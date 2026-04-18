@@ -75,7 +75,7 @@ pub async fn get_comptes_by_enseignant(
 // =========================
 
 #[tauri::command]
-pub async fn get_all_comptes(
+pub async fn get_comptes(
     state: State<'_, DbState>,
 ) -> Result<Vec<CompteBancaire>, String> {
 

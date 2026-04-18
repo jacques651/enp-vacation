@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS vacations (
     nb_classe INTEGER NOT NULL CHECK(nb_classe > 0),
 
     -- Snapshot pour stabilité des calculs
-    vhoraire REAL NOT NULL,
+    vht REAL NOT NULL,
     taux_horaire REAL NOT NULL DEFAULT 5000,
     taux_retenue REAL DEFAULT 2,
 
