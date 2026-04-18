@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT \n            id,\n            libelle,\n            annee_scolaire\n        FROM promotions \n        WHERE annee_scolaire = ?\n        ORDER BY id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "libelle",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "annee_scolaire",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "31f832d347244ce94a0b5c56b837b490733e27c157d0524261f4c515d67ab459"
+}

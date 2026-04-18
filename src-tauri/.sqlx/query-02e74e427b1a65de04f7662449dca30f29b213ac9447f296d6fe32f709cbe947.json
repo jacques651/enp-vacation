@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT \n            p.id,\n            p.libelle,\n            COUNT(v.id) as nombre_vacations\n        FROM promotions p\n        LEFT JOIN vacations v ON v.promotion_id = p.id\n        GROUP BY p.id\n        HAVING COUNT(v.id) > 0\n        ORDER BY nombre_vacations DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "libelle",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "nombre_vacations",
+        "ordinal": 2,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "02e74e427b1a65de04f7662449dca30f29b213ac9447f296d6fe32f709cbe947"
+}

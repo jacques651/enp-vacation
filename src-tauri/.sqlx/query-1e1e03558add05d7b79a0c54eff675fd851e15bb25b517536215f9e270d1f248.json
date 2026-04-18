@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT statut, COUNT(*) as count FROM enseignants GROUP BY statut",
+  "describe": {
+    "columns": [
+      {
+        "name": "statut",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "count",
+        "ordinal": 1,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "1e1e03558add05d7b79a0c54eff675fd851e15bb25b517536215f9e270d1f248"
+}

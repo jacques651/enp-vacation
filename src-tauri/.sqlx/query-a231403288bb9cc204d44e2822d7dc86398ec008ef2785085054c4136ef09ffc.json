@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT titre, COUNT(*) as count FROM enseignants GROUP BY titre ORDER BY titre",
+  "describe": {
+    "columns": [
+      {
+        "name": "titre",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "count",
+        "ordinal": 1,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a231403288bb9cc204d44e2822d7dc86398ec008ef2785085054c4136ef09ffc"
+}

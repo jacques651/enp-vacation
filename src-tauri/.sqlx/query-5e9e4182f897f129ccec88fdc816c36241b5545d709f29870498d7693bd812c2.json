@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT \n            e.id,\n            e.nom,\n            e.prenom,\n            e.telephone,\n            e.titre,\n            e.statut,\n            e.volume_horaire_max,\n            e.banque_id,\n            e.numero_compte,\n            e.cle_rib,\n            b.designation as banque_designation\n        FROM enseignants e\n        LEFT JOIN banques b ON b.id = e.banque_id\n        WHERE e.statut = ?\n        ORDER BY e.nom, e.prenom\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "nom",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "prenom",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "telephone",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "titre",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "statut",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "volume_horaire_max",
+        "ordinal": 6,
+        "type_info": "Int64"
+      },
+      {
+        "name": "banque_id",
+        "ordinal": 7,
+        "type_info": "Int64"
+      },
+      {
+        "name": "numero_compte",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "cle_rib",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "banque_designation",
+        "ordinal": 10,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5e9e4182f897f129ccec88fdc816c36241b5545d709f29870498d7693bd812c2"
+}

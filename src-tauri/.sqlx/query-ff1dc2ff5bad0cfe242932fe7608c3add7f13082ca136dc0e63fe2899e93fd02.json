@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO cycles (designation, nb_classe) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ff1dc2ff5bad0cfe242932fe7608c3add7f13082ca136dc0e63fe2899e93fd02"
+}

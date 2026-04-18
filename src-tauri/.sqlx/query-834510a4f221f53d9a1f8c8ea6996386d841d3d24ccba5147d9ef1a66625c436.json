@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE banques SET designation = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "834510a4f221f53d9a1f8c8ea6996386d841d3d24ccba5147d9ef1a66625c436"
+}

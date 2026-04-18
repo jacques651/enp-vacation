@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, designation, nb_classe FROM cycles",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "designation",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "nb_classe",
+        "ordinal": 2,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9d6f06af7593cfd9eb91425ff630929b0e8d396c89cedbb15ab5b72a27ee1620"
+}

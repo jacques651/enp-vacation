@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE cycles SET designation = ?, nb_classe = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "fd1d603ad3dfff8c7ab5077dc77dcea5ad3d05d37965cf2855848f5d4909fb94"
+}

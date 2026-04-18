@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT \n            v.id,\n            (e.nom || ' ' || e.prenom) as enseignant,\n            m.designation as matiere,\n            v.montant_net as net,\n            '' as date\n         FROM vacations v\n         JOIN enseignants e ON v.enseignant_id = e.id\n         JOIN matieres m ON v.matiere_id = m.id\n         ORDER BY v.id DESC\n         LIMIT 10",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "enseignant",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "matiere",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "net",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "date",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a8027f7c7622f0fa689e800f96d7daf9fd4d5900c8292c67dd8e07380fc726ec"
+}

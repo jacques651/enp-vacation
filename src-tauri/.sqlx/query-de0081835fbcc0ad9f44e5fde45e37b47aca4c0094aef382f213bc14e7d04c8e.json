@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT mois, COUNT(*) as total FROM vacations GROUP BY mois ORDER BY mois",
+  "describe": {
+    "columns": [
+      {
+        "name": "mois",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "total",
+        "ordinal": 1,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "de0081835fbcc0ad9f44e5fde45e37b47aca4c0094aef382f213bc14e7d04c8e"
+}

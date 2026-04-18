@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT \n            e.id,\n            e.nom,\n            e.prenom,\n            e.telephone,\n            e.titre,\n            e.statut,\n            e.volume_horaire_max,\n            COALESCE(SUM(v.vht), 0.0) as heures_consommees,\n            (e.volume_horaire_max - COALESCE(SUM(v.vht), 0.0)) as heures_restantes,\n            b.designation as banque_designation,\n            e.numero_compte,\n            e.cle_rib\n        FROM enseignants e\n        LEFT JOIN banques b ON b.id = e.banque_id\n        LEFT JOIN vacations v ON v.enseignant_id = e.id AND v.annee_scolaire = ?\n        GROUP BY e.id\n        ORDER BY e.nom, e.prenom\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "nom",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "prenom",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "telephone",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "titre",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "statut",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "volume_horaire_max",
+        "ordinal": 6,
+        "type_info": "Int64"
+      },
+      {
+        "name": "heures_consommees",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "heures_restantes",
+        "ordinal": 8,
+        "type_info": "Float"
+      },
+      {
+        "name": "banque_designation",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "numero_compte",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "cle_rib",
+        "ordinal": 11,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "702cb9faaae8f67d7d9d4a38471e0af3ee60c5411c615910c834ad2a0ad9acc1"
+}
