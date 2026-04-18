@@ -168,7 +168,35 @@ CREATE TABLE IF NOT EXISTS ordre_virement_lignes (
 );
 
 -- =====================================================
--- 6. INDEX (PERFORMANCES)
+-- 6. SIGNAIRES
+-- =====================================================
+CREATE TABLE IF NOT EXISTS signataires (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nom TEXT NOT NULL,
+    prenom TEXT NOT NULL,
+    fonction TEXT NOT NULL,
+    titre TEXT NOT NULL,
+    ordre_signature INTEGER NOT NULL DEFAULT 1,
+    actif INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CHECK (ordre_signature > 0),
+    CHECK (actif IN (0, 1))
+);
+
+-- =====================================================
+-- 7. ENTETE (PARAMETRES GENERAUX) - AVEC BASE64
+-- =====================================================
+CREATE TABLE IF NOT EXISTS entete (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cle TEXT NOT NULL UNIQUE,
+    valeur TEXT,  -- Stocke le base64 pour le logo
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================================================
+-- 8. INDEX (PERFORMANCES)
 -- =====================================================
 CREATE INDEX IF NOT EXISTS idx_modules_cycle ON modules(cycle_id);
 CREATE INDEX IF NOT EXISTS idx_matieres_module ON matieres(module_id);
@@ -176,23 +204,16 @@ CREATE INDEX IF NOT EXISTS idx_vacations_enseignant ON vacations(enseignant_id);
 CREATE INDEX IF NOT EXISTS idx_vacations_matiere ON vacations(matiere_id);
 CREATE INDEX IF NOT EXISTS idx_vacations_promotion ON vacations(promotion_id);
 CREATE INDEX IF NOT EXISTS idx_vacations_annee_scolaire ON vacations(annee_scolaire_id);
+CREATE INDEX IF NOT EXISTS idx_signataires_actif ON signataires(actif);
+CREATE INDEX IF NOT EXISTS idx_signataires_ordre ON signataires(ordre_signature);
+CREATE INDEX IF NOT EXISTS idx_entete_cle ON entete(cle);
 
 -- =====================================================
--- 7. DONNEES INITIALES (PLAFONDS)
+-- 9. VUE UTILE (ETAT DE LIQUIDATION)
 -- =====================================================
-INSERT OR IGNORE INTO plafonds (titre, statut, volume_horaire_max) VALUES
-    ('directeur', 'interne', 140),
-    ('chef de service', 'interne', 160),
-    ('autre', 'interne', 180),
-    ('directeur', 'externe', 140),
-    ('chef de division/service', 'externe', 160),
-    ('agent', 'externe', 180),
-    ('retraité', 'externe', 200);
+DROP VIEW IF EXISTS v_etat_liquidation;
 
--- =====================================================
--- 8. VUE UTILE (ETAT DE LIQUIDATION)
--- =====================================================
-CREATE VIEW IF NOT EXISTS v_etat_liquidation AS
+CREATE VIEW v_etat_liquidation AS
 SELECT 
     v.id AS numero_ordre,
     e.nom,
@@ -204,16 +225,16 @@ SELECT
     m.designation AS matiere,
     b.designation AS banque,
 
-    v.vhoraire,
+    m.vhoraire AS vhoraire,
     v.nb_classe,
-    (v.vhoraire * v.nb_classe) AS vht,
+    v.vht,
 
     v.taux_horaire,
     v.taux_retenue,
 
-    (v.vhoraire * v.nb_classe * v.taux_horaire) AS montant_brut,
-    (v.vhoraire * v.nb_classe * v.taux_horaire * v.taux_retenue / 100) AS montant_retenu,
-    (v.vhoraire * v.nb_classe * v.taux_horaire * (1 - v.taux_retenue / 100)) AS montant_net,
+    (v.vht * v.taux_horaire) AS montant_brut,
+    (v.vht * v.taux_horaire * v.taux_retenue / 100) AS montant_retenu,
+    (v.vht * v.taux_horaire * (1 - v.taux_retenue / 100)) AS montant_net,
 
     v.mois,
     v.annee,
@@ -229,6 +250,42 @@ LEFT JOIN comptes_bancaires cb ON cb.enseignant_id = e.id AND cb.actif = 1
 LEFT JOIN banques b ON b.id = cb.banque_id
 JOIN annees_scolaires a ON a.id = v.annee_scolaire_id
 JOIN promotions p ON p.id = v.promotion_id;
+
+-- =====================================================
+-- 10. DONNEES INITIALES
+-- =====================================================
+
+-- Plafonds
+INSERT OR IGNORE INTO plafonds (titre, statut, volume_horaire_max) VALUES
+    ('directeur', 'interne', 140),
+    ('chef de service', 'interne', 160),
+    ('autre', 'interne', 180),
+    ('directeur', 'externe', 140),
+    ('chef de division/service', 'externe', 160),
+    ('agent', 'externe', 180),
+    ('retraité', 'externe', 200);
+
+-- Signataires
+INSERT OR IGNORE INTO signataires (nom, prenom, fonction, titre, ordre_signature, actif) VALUES
+    ('DIALLO', 'Amadou', 'Directeur Général', 'Colonel', 1, 1),
+    ('SOW', 'Fatoumata', 'Secrétaire Général', 'Commissaire Divisionnaire', 2, 1),
+    ('BA', 'Mamadou', 'Directeur Administratif et Financier', 'Contrôleur Général', 3, 1);
+
+-- Entête (paramètres généraux) - logo en base64 vide au départ
+INSERT OR IGNORE INTO entete (cle, valeur) VALUES
+    ('nom_etablissement', 'ECOLE NATIONALE DE POLICE'),
+    ('sigle', 'ENP'),
+    ('logo', ''),  -- Base64 du logo (vide au départ)
+    ('adresse', '01 BP 1234 OUAGADOUGOU 01'),
+    ('telephone', '25 36 11 11'),
+    ('email', 'enp@police.bf'),
+    ('directeur_nom', ''),
+    ('directeur_titre', ''),
+    ('directeur_fonction', ''),
+    ('comptable_nom', ''),
+    ('comptable_titre', ''),
+    ('comptable_fonction', ''),
+    ('signataire_defaut', '');
 
 -- =====================================================
 -- FIN

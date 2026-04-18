@@ -14,8 +14,9 @@ import {
   TextInput,
   Select,
   Modal,
-  Switch,
   LoadingOverlay,
+  ThemeIcon,
+  Pagination,
 } from '@mantine/core';
 import {
   IconPlus,
@@ -24,6 +25,8 @@ import {
   IconSearch,
   IconCheck,
   IconAlertCircle,
+  IconTableImport,
+  IconBuildingBank,
 } from '@tabler/icons-react';
 
 import { invoke } from '@tauri-apps/api/core';
@@ -48,7 +51,7 @@ interface CompteBancaire {
   banque_id: number;
   numero_compte: string;
   actif: boolean;
-  banque: string; // jointure avec le nom de la banque
+  banque: string;
 }
 
 // ================= COMPONENT =================
@@ -59,6 +62,8 @@ export default function ComptesBancairesManager() {
   const [modalOpened, setModalOpened] = useState(false);
   const [selectedEnseignant, setSelectedEnseignant] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   const [formData, setFormData] = useState({
     enseignant_id: null as number | null,
@@ -78,11 +83,9 @@ export default function ComptesBancairesManager() {
     queryFn: () => invoke('get_banques'),
   });
 
-  // Récupérer les comptes pour un enseignant spécifique
   const { 
     data: comptes = [], 
     isLoading: isLoadingComptes,
-    refetch: refetchComptes 
   } = useQuery<CompteBancaire[]>({
     queryKey: ['comptes', selectedEnseignant],
     queryFn: () => {
@@ -97,12 +100,17 @@ export default function ComptesBancairesManager() {
     [enseignants]
   );
 
-  // ================= FILTER =================
-
+  // Pagination des enseignants
   const filteredEnseignants = enseignants.filter(e => {
     const label = `${e.nom} ${e.prenom}`.toLowerCase();
     return label.includes(search.toLowerCase());
   });
+
+  const totalPages = Math.ceil(filteredEnseignants.length / itemsPerPage);
+  const paginatedEnseignants = filteredEnseignants.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   // ================= MUTATIONS =================
 
@@ -154,6 +162,7 @@ export default function ComptesBancairesManager() {
 
   const handleSelectEnseignant = (enseignantId: number) => {
     setSelectedEnseignant(enseignantId);
+    setCurrentPage(1);
   };
 
   const isLoading = isLoadingEnseignants || isLoadingBanques || isLoadingComptes;
@@ -161,128 +170,196 @@ export default function ComptesBancairesManager() {
   // ================= UI =================
 
   return (
-    <Stack pos="relative">
+    <Stack p="md" gap="lg">
       <LoadingOverlay visible={isLoading} />
 
-      {/* HEADER */}
-      <Card withBorder radius="md" p="lg">
+      {/* HEADER - Même style que ImportExcel */}
+      <Card withBorder radius="md" p="lg" bg="adminBlue.8">
         <Group justify="space-between">
-          <div>
-            <Title order={3}>Comptes bancaires</Title>
-            <Text size="sm" c="dimmed">
+          <Stack gap={2}>
+            <Title order={2} c="white">Gestion des comptes bancaires</Title>
+            <Text size="sm" c="gray.3">
               Gérez les comptes bancaires des enseignants
             </Text>
-          </div>
-          <Button 
-            leftSection={<IconPlus size={16} />} 
-            onClick={() => setModalOpened(true)}
-            disabled={!selectedEnseignant}
-          >
-            Ajouter un compte
-          </Button>
+          </Stack>
+          <ThemeIcon size={48} radius="md" color="white" variant="light">
+            <IconBuildingBank size={28} />
+          </ThemeIcon>
         </Group>
       </Card>
 
-      {/* RECHERCHE ENSEIGNANT */}
+      {/* SECTION ENSEIGNANTS */}
       <Card withBorder radius="md" p="lg">
-        <Title order={5} mb="md">Sélectionner un enseignant</Title>
-        <TextInput
-          placeholder="Rechercher un enseignant..."
-          leftSection={<IconSearch size={16} />}
-          value={search}
-          onChange={(e) => setSearch(e.currentTarget.value)}
-          mb="md"
-        />
-        
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Nom</Table.Th>
-              <Table.Th>Prénom</Table.Th>
-              <Table.Th style={{ width: 100 }}>Action</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {filteredEnseignants.map((enseignant) => (
-              <Table.Tr 
-                key={enseignant.id}
-                bg={selectedEnseignant === enseignant.id ? 'blue.0' : undefined}
-              >
-                <Table.Td>{enseignant.nom}</Table.Td>
-                <Table.Td>{enseignant.prenom}</Table.Td>
-                <Table.Td>
-                  <Button
-                    variant={selectedEnseignant === enseignant.id ? 'filled' : 'light'}
-                    size="xs"
-                    onClick={() => handleSelectEnseignant(enseignant.id)}
-                  >
-                    {selectedEnseignant === enseignant.id ? 'Sélectionné' : 'Sélectionner'}
-                  </Button>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+        <Stack gap="md">
+          <div>
+            <Title order={4}>Sélectionner un enseignant</Title>
+            <Text size="sm" c="dimmed">
+              Choisissez un enseignant pour gérer ses comptes bancaires
+            </Text>
+          </div>
+
+          <Divider />
+
+          <TextInput
+            placeholder="Rechercher un enseignant..."
+            leftSection={<IconSearch size={16} />}
+            value={search}
+            onChange={(e) => {
+              setSearch(e.currentTarget.value);
+              setCurrentPage(1);
+            }}
+          />
+
+          {filteredEnseignants.length === 0 ? (
+            <Alert icon={<IconAlertCircle size={16} />} color="blue" variant="light">
+              Aucun enseignant trouvé.
+            </Alert>
+          ) : (
+            <>
+              <ScrollArea style={{ maxHeight: 400 }}>
+                <Table striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>N°</Table.Th>
+                      <Table.Th>Nom</Table.Th>
+                      <Table.Th>Prénom</Table.Th>
+                      <Table.Th style={{ width: 120 }}>Action</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {paginatedEnseignants.map((enseignant, index) => {
+                      const numero = (currentPage - 1) * itemsPerPage + index + 1;
+                      return (
+                        <Table.Tr 
+                          key={enseignant.id}
+                          bg={selectedEnseignant === enseignant.id ? 'blue.0' : undefined}
+                        >
+                          <Table.Td>
+                            <Badge color="gray" variant="light" size="sm">
+                              {numero}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text fw={500}>{enseignant.nom}</Text>
+                          </Table.Td>
+                          <Table.Td>{enseignant.prenom}</Table.Td>
+                          <Table.Td>
+                            <Button
+                              variant={selectedEnseignant === enseignant.id ? 'filled' : 'light'}
+                              size="xs"
+                              onClick={() => handleSelectEnseignant(enseignant.id)}
+                              color={selectedEnseignant === enseignant.id ? 'blue' : 'gray'}
+                            >
+                              {selectedEnseignant === enseignant.id ? 'Sélectionné' : 'Sélectionner'}
+                            </Button>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+
+              {totalPages > 1 && (
+                <Group justify="center" mt="md">
+                  <Pagination
+                    value={currentPage}
+                    onChange={setCurrentPage}
+                    total={totalPages}
+                    color="blue"
+                  />
+                </Group>
+              )}
+            </>
+          )}
+        </Stack>
       </Card>
 
       {/* COMPTES BANCAIRES */}
       {selectedEnseignant && (
         <Card withBorder radius="md" p="lg">
-          <Title order={5} mb="md">
-            Comptes bancaires de {enseignantMap[selectedEnseignant]?.nom} {enseignantMap[selectedEnseignant]?.prenom}
-          </Title>
+          <Stack gap="md">
+            <Group justify="space-between" align="flex-end">
+              <div>
+                <Title order={4}>
+                  Comptes bancaires de {enseignantMap[selectedEnseignant]?.nom} {enseignantMap[selectedEnseignant]?.prenom}
+                </Title>
+                <Text size="sm" c="dimmed">
+                  {comptes.length} compte{comptes.length > 1 ? 's' : ''} enregistré{comptes.length > 1 ? 's' : ''}
+                </Text>
+              </div>
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={() => setModalOpened(true)}
+                variant="gradient"
+                gradient={{ from: 'blue', to: 'cyan' }}
+              >
+                Ajouter un compte
+              </Button>
+            </Group>
 
-          {comptes.length === 0 ? (
-            <Alert icon={<IconAlertCircle size={16} />} color="blue" variant="light">
-              Aucun compte bancaire enregistré pour cet enseignant.
-            </Alert>
-          ) : (
-            <Table striped highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Banque</Table.Th>
-                  <Table.Th>Numéro de compte</Table.Th>
-                  <Table.Th>Statut</Table.Th>
-                  <Table.Th style={{ width: 120 }}>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {comptes.map((compte) => (
-                  <Table.Tr key={compte.id}>
-                    <Table.Td>{compte.banque}</Table.Td>
-                    <Table.Td>{compte.numero_compte}</Table.Td>
-                    <Table.Td>
-                      <Badge color={compte.actif ? 'green' : 'gray'}>
-                        {compte.actif ? 'Actif' : 'Inactif'}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap="xs">
-                        {!compte.actif && (
-                          <ActionIcon
-                            color="green"
-                            onClick={() => handleSetActif(compte.id, compte.enseignant_id)}
-                            loading={setActifMutation.isPending}
-                            title="Définir comme compte actif"
-                          >
-                            <IconCheck size={16} />
-                          </ActionIcon>
-                        )}
-                        <ActionIcon 
-                          color="red" 
-                          onClick={() => deleteMutation.mutate(compte.id)}
-                          loading={deleteMutation.isPending}
-                          title="Supprimer"
-                        >
-                          <IconTrash size={16} />
-                        </ActionIcon>
-                      </Group>
-                    </Table.Td>
+            <Divider />
+
+            {comptes.length === 0 ? (
+              <Alert icon={<IconAlertCircle size={16} />} color="blue" variant="light">
+                Aucun compte bancaire enregistré pour cet enseignant.
+              </Alert>
+            ) : (
+              <Table striped highlightOnHover>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Banque</Table.Th>
+                    <Table.Th>Numéro de compte</Table.Th>
+                    <Table.Th>Statut</Table.Th>
+                    <Table.Th style={{ width: 120 }}>Actions</Table.Th>
                   </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          )}
+                </Table.Thead>
+                <Table.Tbody>
+                  {comptes.map((compte) => (
+                    <Table.Tr key={compte.id}>
+                      <Table.Td>
+                        <Badge color="cyan" variant="light" size="sm">
+                          {compte.banque}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text fw={500}>{compte.numero_compte}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge color={compte.actif ? 'green' : 'gray'} variant="light">
+                          {compte.actif ? 'Actif' : 'Inactif'}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="xs">
+                          {!compte.actif && (
+                            <ActionIcon
+                              color="green"
+                              onClick={() => handleSetActif(compte.id, compte.enseignant_id)}
+                              loading={setActifMutation.isPending}
+                              title="Définir comme compte actif"
+                              variant="subtle"
+                            >
+                              <IconCheck size={16} />
+                            </ActionIcon>
+                          )}
+                          <ActionIcon 
+                            color="red" 
+                            onClick={() => deleteMutation.mutate(compte.id)}
+                            loading={deleteMutation.isPending}
+                            title="Supprimer"
+                            variant="subtle"
+                          >
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            )}
+          </Stack>
         </Card>
       )}
 
@@ -295,8 +372,9 @@ export default function ComptesBancairesManager() {
         }} 
         title="Ajouter un compte bancaire"
         size="md"
+        centered
       >
-        <Stack>
+        <Stack gap="md">
           <Select
             label="Enseignant"
             placeholder="Sélectionner un enseignant"
@@ -329,15 +407,47 @@ export default function ComptesBancairesManager() {
             required
           />
 
-          <Button 
-            onClick={handleSubmit} 
-            loading={createMutation.isPending}
-            disabled={!formData.enseignant_id || !formData.banque_id || !formData.numero_compte}
-          >
-            Créer le compte
-          </Button>
+          <Group justify="flex-end" mt="md">
+            <Button variant="light" onClick={() => setModalOpened(false)}>
+              Annuler
+            </Button>
+            <Button 
+              onClick={handleSubmit} 
+              loading={createMutation.isPending}
+              disabled={!formData.enseignant_id || !formData.banque_id || !formData.numero_compte}
+              variant="gradient"
+              gradient={{ from: 'blue', to: 'cyan' }}
+            >
+              Créer le compte
+            </Button>
+          </Group>
         </Stack>
       </Modal>
+
+      {/* SECTION INSTRUCTIONS */}
+      <Card withBorder radius="md" p="lg">
+        <Title order={5} mb="md">📋 Instructions</Title>
+        <Stack gap="xs">
+          <Text size="sm">1. Sélectionnez d'abord un enseignant dans la liste</Text>
+          <Text size="sm">2. Cliquez sur "Ajouter un compte" pour créer un compte bancaire</Text>
+          <Text size="sm">3. Un seul compte peut être actif par enseignant</Text>
+          <Text size="sm">4. Le compte actif sera utilisé pour les virements automatiques</Text>
+          <Text size="sm">5. Utilisez la recherche pour trouver rapidement un enseignant</Text>
+        </Stack>
+        
+        <Divider my="md" />
+        
+        <Title order={5} mb="md">📝 Notes importantes</Title>
+        <Stack gap="xs">
+          <Text size="sm">• Les comptes bancaires sont liés aux enseignants et aux banques</Text>
+          <Text size="sm">• Seul le compte actif reçoit les virements</Text>
+          <Text size="sm">• La suppression d'un compte est définitive</Text>
+          <Text size="sm">• Les banques doivent être préalablement créées dans le référentiel</Text>
+        </Stack>
+      </Card>
     </Stack>
   );
 }
+
+// Ajout du composant ScrollArea manquant
+import { ScrollArea } from '@mantine/core';

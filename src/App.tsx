@@ -14,7 +14,7 @@ const AnneesScolairesManager = lazy(() => import('./pages/referentiels/AnneesSco
 const PromotionsManager = lazy(() => import('./pages/referentiels/PromotionsManager'));
 const ComptesBancairesManager = lazy(() => import('./pages/referentiels/ComptesBancairesManager'));
 const ImportExcel = lazy(() => import('./pages/referentiels/ImportExcel'));
-const EnteteSimple = lazy(() => import('./components/admin/EnteteSimple'));
+const EnteteManager = lazy(() => import('./pages/referentiels/EnteteManager')); // Changé de EnteteSimple à EnteteManager
 
 // Composant de chargement
 const LoadingFallback = () => (
@@ -59,10 +59,8 @@ function App() {
               <Route path="/annees-scolaires" element={<AnneesScolairesManager />} />
               <Route path="/promotions" element={<PromotionsManager />} />
               <Route path="/comptes-bancaires" element={<ComptesBancairesManager />} />
+              <Route path="/entete" element={<EnteteManager />} /> {/* Nouvelle route pour l'entête */}
               <Route path="/import" element={<ImportExcel />} />
-              
-              {/* Administration */}
-              <Route path="/entete-config" element={<EnteteSimple />} />
               
               {/* Rapports */}
               <Route path="/cumuls" element={<div>Cumuls annuels (à venir)</div>} />

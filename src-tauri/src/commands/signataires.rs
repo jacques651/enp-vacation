@@ -4,9 +4,10 @@ use crate::db::DbState;
 use serde::{Serialize, Deserialize};
 use sqlx::FromRow;
 use tauri::State;
+use chrono::NaiveDateTime;
 
 // =========================
-// MODELE
+// MODELE (ALIGNÉ AVEC db.rs)
 // =========================
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -14,9 +15,12 @@ pub struct Signataire {
     pub id: i32,
     pub nom: String,
     pub prenom: String,
-    pub grade: Option<String>,
-    pub fonction: Option<String>,
-    pub titre_honorifique: Option<String>,
+    pub fonction: String,        // fonction avant titre
+    pub titre: String,           // titre après fonction
+    pub ordre_signature: i32,
+    pub actif: i32,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
 }
 
 // =========================
@@ -27,31 +31,41 @@ pub struct Signataire {
 pub struct CreateSignataire {
     pub nom: String,
     pub prenom: String,
-    pub grade: Option<String>,
-    pub fonction: Option<String>,
-    pub titre_honorifique: Option<String>,
+    pub fonction: String,        // fonction avant titre
+    pub titre: String,
+    pub ordre_signature: Option<i32>,
+    pub actif: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateSignataire {
     pub nom: Option<String>,
     pub prenom: Option<String>,
-    pub grade: Option<String>,
-    pub fonction: Option<String>,
-    pub titre_honorifique: Option<String>,
+    pub fonction: Option<String>, // fonction avant titre
+    pub titre: Option<String>,
+    pub ordre_signature: Option<i32>,
+    pub actif: Option<i32>,
 }
 
 // =========================
 // VALIDATION
 // =========================
 
-fn validate(nom: &str, prenom: &str) -> Result<(), String> {
+fn validate(nom: &str, prenom: &str, fonction: &str, titre: &str) -> Result<(), String> {
     if nom.trim().is_empty() {
-        return Err("Nom obligatoire".into());
+        return Err("Le nom est obligatoire".into());
     }
 
     if prenom.trim().is_empty() {
-        return Err("Prénom obligatoire".into());
+        return Err("Le prénom est obligatoire".into());
+    }
+
+    if fonction.trim().is_empty() {
+        return Err("La fonction est obligatoire".into());
+    }
+
+    if titre.trim().is_empty() {
+        return Err("Le titre est obligatoire".into());
     }
 
     Ok(())
@@ -67,13 +81,33 @@ pub async fn get_signataires(
 ) -> Result<Vec<Signataire>, String> {
 
     sqlx::query_as::<_, Signataire>(
-        "SELECT id, nom, prenom, grade, fonction, titre_honorifique 
+        "SELECT id, nom, prenom, fonction, titre, ordre_signature, actif, created_at, updated_at
          FROM signataires 
-         ORDER BY nom, prenom"
+         ORDER BY ordre_signature ASC, nom, prenom"
     )
     .fetch_all(&state.pool)
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| format!("Erreur lors du chargement des signataires: {}", e))
+}
+
+// =========================
+// GET ACTIFS
+// =========================
+
+#[tauri::command]
+pub async fn get_signataires_actifs(
+    state: State<'_, DbState>,
+) -> Result<Vec<Signataire>, String> {
+
+    sqlx::query_as::<_, Signataire>(
+        "SELECT id, nom, prenom, fonction, titre, ordre_signature, actif, created_at, updated_at
+         FROM signataires 
+         WHERE actif = 1
+         ORDER BY ordre_signature ASC, nom, prenom"
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| format!("Erreur lors du chargement des signataires actifs: {}", e))
 }
 
 // =========================
@@ -87,7 +121,7 @@ pub async fn get_signataire_by_id(
 ) -> Result<Signataire, String> {
 
     sqlx::query_as::<_, Signataire>(
-        "SELECT id, nom, prenom, grade, fonction, titre_honorifique 
+        "SELECT id, nom, prenom, fonction, titre, ordre_signature, actif, created_at, updated_at
          FROM signataires WHERE id = ?"
     )
     .bind(id)
@@ -106,23 +140,37 @@ pub async fn create_signataire(
     data: CreateSignataire,
 ) -> Result<Signataire, String> {
 
-    validate(&data.nom, &data.prenom)?;
+    validate(&data.nom, &data.prenom, &data.fonction, &data.titre)?;
+
+    let ordre_signature = data.ordre_signature.unwrap_or(1);
+    let actif = data.actif.unwrap_or(1);
+
+    // Vérifier que l'ordre_signature est > 0
+    if ordre_signature <= 0 {
+        return Err("L'ordre de signature doit être supérieur à 0".into());
+    }
+
+    // Vérifier que actif est 0 ou 1
+    if actif != 0 && actif != 1 {
+        return Err("Le statut actif doit être 0 (inactif) ou 1 (actif)".into());
+    }
 
     let id: i32 = sqlx::query_scalar(
         r#"
-        INSERT INTO signataires (nom, prenom, grade, fonction, titre_honorifique)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO signataires (nom, prenom, fonction, titre, ordre_signature, actif, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING id
         "#
     )
     .bind(&data.nom)
     .bind(&data.prenom)
-    .bind(&data.grade)
     .bind(&data.fonction)
-    .bind(&data.titre_honorifique)
+    .bind(&data.titre)
+    .bind(ordre_signature)
+    .bind(actif)
     .fetch_one(&state.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| format!("Erreur lors de la création du signataire: {}", e))?;
 
     get_signataire_by_id(state, id).await
 }
@@ -142,25 +190,41 @@ pub async fn update_signataire(
 
     let nom = data.nom.unwrap_or(current.nom);
     let prenom = data.prenom.unwrap_or(current.prenom);
+    let fonction = data.fonction.unwrap_or(current.fonction);
+    let titre = data.titre.unwrap_or(current.titre);
 
-    validate(&nom, &prenom)?;
+    validate(&nom, &prenom, &fonction, &titre)?;
+
+    let ordre_signature = data.ordre_signature.unwrap_or(current.ordre_signature);
+    let actif = data.actif.unwrap_or(current.actif);
+
+    // Vérifier que l'ordre_signature est > 0
+    if ordre_signature <= 0 {
+        return Err("L'ordre de signature doit être supérieur à 0".into());
+    }
+
+    // Vérifier que actif est 0 ou 1
+    if actif != 0 && actif != 1 {
+        return Err("Le statut actif doit être 0 (inactif) ou 1 (actif)".into());
+    }
 
     sqlx::query(
         r#"
         UPDATE signataires
-        SET nom = ?, prenom = ?, grade = ?, fonction = ?, titre_honorifique = ?
+        SET nom = ?, prenom = ?, fonction = ?, titre = ?, ordre_signature = ?, actif = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         "#
     )
     .bind(&nom)
     .bind(&prenom)
-    .bind(data.grade.or(current.grade))
-    .bind(data.fonction.or(current.fonction))
-    .bind(data.titre_honorifique.or(current.titre_honorifique))
+    .bind(&fonction)
+    .bind(&titre)
+    .bind(ordre_signature)
+    .bind(actif)
     .bind(id)
     .execute(&state.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| format!("Erreur lors de la mise à jour du signataire: {}", e))?;
 
     get_signataire_by_id(state, id).await
 }
@@ -191,7 +255,7 @@ pub async fn delete_signataire(
         .bind(id)
         .execute(&state.pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Erreur lors de la suppression du signataire: {}", e))?;
 
     Ok(())
 }
@@ -209,14 +273,16 @@ pub async fn search_signataires(
     let pattern = format!("%{}%", search);
 
     sqlx::query_as::<_, Signataire>(
-        "SELECT id, nom, prenom, grade, fonction, titre_honorifique 
+        "SELECT id, nom, prenom, fonction, titre, ordre_signature, actif, created_at, updated_at
          FROM signataires 
-         WHERE nom LIKE ? OR prenom LIKE ?
-         ORDER BY nom, prenom"
+         WHERE nom LIKE ? OR prenom LIKE ? OR fonction LIKE ? OR titre LIKE ?
+         ORDER BY ordre_signature ASC, nom, prenom"
     )
+    .bind(&pattern)
+    .bind(&pattern)
     .bind(&pattern)
     .bind(&pattern)
     .fetch_all(&state.pool)
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| format!("Erreur lors de la recherche des signataires: {}", e))
 }

@@ -13,7 +13,7 @@ import {
 } from './referentiels';
 
 import ImportExcel from './referentiels/ImportExcel';
-import EnteteSimple from '../components/admin/EnteteSimple';
+import EnteteManager from './referentiels/EnteteManager'; // Changé de EnteteSimple à EnteteManager
 import ComptesBancairesManager from './referentiels/ComptesBancairesManager';
 import AnneesScolairesManager from './referentiels/AnneesScolairesManager';
 
@@ -45,7 +45,7 @@ export function GestionReferentiels() {
           {/* ===== CONFIG ===== */}
           <Tabs.Tab value="plafonds">Plafonds</Tabs.Tab>
           <Tabs.Tab value="signataires">Signataires</Tabs.Tab>
-          <Tabs.Tab value="entete">Configuration en-tête</Tabs.Tab>
+          <Tabs.Tab value="entete">Paramètres établissement</Tabs.Tab> {/* Changé le libellé */}
 
           {/* ===== IMPORT ===== */}
           <Tabs.Tab
@@ -104,7 +104,7 @@ export function GestionReferentiels() {
         </Tabs.Panel>
 
         <Tabs.Panel value="entete">
-          <EnteteSimple />
+          <EnteteManager /> {/* Changé de EnteteSimple à EnteteManager */}
         </Tabs.Panel>
 
         {/* IMPORT */}
