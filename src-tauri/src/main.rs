@@ -129,17 +129,16 @@ fn main() {
             // ================= DASHBOARD =================
             get_dashboard_stats,
             
-            // ================= IMPORT (TOUTES LES COMMANDES) =================
-            
-           
+            // ================= IMPORT/EXPORT =================
+            import_cycles,
+            import_modules,
             import_matieres,
             import_enseignants,
             import_banques,
             import_promotions,
             import_plafonds,
+            import_annees_scolaires,
             import_comptes_bancaires,
-            
-            // ================= EXPORT =================
             export_all_data_json,
         ])
         .run(tauri::generate_context!())

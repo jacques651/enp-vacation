@@ -1,23 +1,36 @@
 // src-tauri/src/commands/utils.rs
 
 use crate::db::DbState;
-use serde::{Serialize};
+use serde::Serialize;
 use serde_json::json;
-use tauri::State;
 use sqlx::FromRow;
+use tauri::State;
 
 // =========================
 // STRUCTS EXPORT
 // =========================
 
 #[derive(Serialize, FromRow)]
-struct Cycle { id: i32, designation: String, nb_classe: i32 }
+struct Cycle {
+    id: i32,
+    designation: String,
+    nb_classe: i32,
+}
 
 #[derive(Serialize, FromRow)]
-struct Module { id: i32, designation: String, cycle_id: i32 }
+struct Module {
+    id: i32,
+    designation: String,
+    cycle_id: i32,
+}
 
 #[derive(Serialize, FromRow)]
-struct Matiere { id: i32, designation: String, vhoraire: f64, module_id: i32 }
+struct Matiere {
+    id: i32,
+    designation: String,
+    vhoraire: f64,
+    module_id: i32,
+}
 
 #[derive(Serialize, FromRow)]
 struct Enseignant {
@@ -39,13 +52,22 @@ struct Compte {
 }
 
 #[derive(Serialize, FromRow)]
-struct Banque { id: i32, designation: String }
+struct Banque {
+    id: i32,
+    designation: String,
+}
 
 #[derive(Serialize, FromRow)]
-struct Promotion { id: i32, libelle: String }
+struct Promotion {
+    id: i32,
+    libelle: String,
+}
 
 #[derive(Serialize, FromRow)]
-struct Annee { id: i32, libelle: String }
+struct Annee {
+    id: i32,
+    libelle: String,
+}
 
 #[derive(Serialize, FromRow)]
 struct Vacation {
@@ -55,73 +77,107 @@ struct Vacation {
     promotion_id: i32,
     annee_scolaire_id: i32,
     nb_classe: i32,
-    vhoraire: f64,
+    vht: f64,
     taux_horaire: f64,
     taux_retenue: f64,
     mois: i32,
     annee: i32,
+    date_traitement: Option<String>,
 }
 
 #[derive(Serialize, FromRow)]
-struct Plafond { id: i32, titre: String, statut: String, volume_horaire_max: i32 }
+struct Plafond {
+    id: i32,
+    titre: String,
+    statut: String,
+    volume_horaire_max: i32,
+}
 
 #[derive(Serialize, FromRow)]
 struct Signataire {
     id: i32,
     nom: String,
     prenom: String,
-    grade: Option<String>,
     fonction: String,
-    titre_honorifique: Option<String>,
+    titre: String,
+    ordre_signature: i32,
+    actif: i32,
 }
 
 #[derive(Serialize, FromRow)]
-struct Entete { id: i32, cle: String, valeur: String }
+struct Entete {
+    id: i32,
+    cle: String,
+    valeur: Option<String>,
+}
 
 // =========================
 // EXPORT JSON
 // =========================
 
 #[tauri::command]
-pub async fn export_all_data_json(
-    state: State<'_, DbState>,
-) -> Result<String, String> {
-
+pub async fn export_all_data_json(state: State<'_, DbState>) -> Result<String, String> {
     let cycles = sqlx::query_as::<_, Cycle>("SELECT * FROM cycles")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let modules = sqlx::query_as::<_, Module>("SELECT * FROM modules")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let matieres = sqlx::query_as::<_, Matiere>("SELECT * FROM matieres")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let enseignants = sqlx::query_as::<_, Enseignant>("SELECT * FROM enseignants")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let comptes = sqlx::query_as::<_, Compte>("SELECT * FROM comptes_bancaires")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let banques = sqlx::query_as::<_, Banque>("SELECT * FROM banques")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let promotions = sqlx::query_as::<_, Promotion>("SELECT * FROM promotions")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let annees = sqlx::query_as::<_, Annee>("SELECT * FROM annees_scolaires")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let vacations = sqlx::query_as::<_, Vacation>("SELECT * FROM vacations")
+    let vacations = sqlx::query_as::<_, Vacation>(
+        "SELECT id, enseignant_id, matiere_id, promotion_id, annee_scolaire_id, nb_classe, vht, taux_horaire, taux_retenue, mois, annee, date_traitement FROM vacations",
+    )
         .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
 
     let plafonds = sqlx::query_as::<_, Plafond>("SELECT * FROM plafonds")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let signataires = sqlx::query_as::<_, Signataire>("SELECT * FROM signataires")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+    let signataires = sqlx::query_as::<_, Signataire>(
+        "SELECT id, nom, prenom, fonction, titre, ordre_signature, actif FROM signataires",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
 
     let entetes = sqlx::query_as::<_, Entete>("SELECT * FROM entete")
-        .fetch_all(&state.pool).await.map_err(|e| e.to_string())?;
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let export = json!({
         "cycles": cycles,
@@ -139,6 +195,5 @@ pub async fn export_all_data_json(
         "export_date": chrono::Local::now().to_string()
     });
 
-    serde_json::to_string_pretty(&export)
-        .map_err(|e| e.to_string())
+    serde_json::to_string_pretty(&export).map_err(|e| e.to_string())
 }

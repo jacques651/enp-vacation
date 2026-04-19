@@ -90,8 +90,8 @@ CREATE TABLE IF NOT EXISTS comptes_bancaires (
     actif INTEGER DEFAULT 1,
     date_debut DATE,
     date_fin DATE,
-    FOREIGN KEY (enseignant_id) REFERENCES enseignants(id),
-    FOREIGN KEY (banque_id) REFERENCES banques(id)
+    FOREIGN KEY (enseignant_id) REFERENCES enseignants(id) ON DELETE CASCADE,
+    FOREIGN KEY (banque_id) REFERENCES banques(id) ON DELETE CASCADE
 );
 
 -- =====================================================
@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS signataires (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nom TEXT NOT NULL,
     prenom TEXT NOT NULL,
+    grade TEXT NOT NULL,
     fonction TEXT NOT NULL,
     titre TEXT NOT NULL,
     ordre_signature INTEGER NOT NULL DEFAULT 1,
@@ -207,6 +208,9 @@ CREATE INDEX IF NOT EXISTS idx_vacations_annee_scolaire ON vacations(annee_scola
 CREATE INDEX IF NOT EXISTS idx_signataires_actif ON signataires(actif);
 CREATE INDEX IF NOT EXISTS idx_signataires_ordre ON signataires(ordre_signature);
 CREATE INDEX IF NOT EXISTS idx_entete_cle ON entete(cle);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cycles_designation_unique ON cycles(designation);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_modules_designation_cycle_unique ON modules(designation, cycle_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_matieres_designation_module_unique ON matieres(designation, module_id);
 
 -- =====================================================
 -- 9. VUE UTILE (ETAT DE LIQUIDATION)
@@ -266,10 +270,10 @@ INSERT OR IGNORE INTO plafonds (titre, statut, volume_horaire_max) VALUES
     ('retraité', 'externe', 200);
 
 -- Signataires
-INSERT OR IGNORE INTO signataires (nom, prenom, fonction, titre, ordre_signature, actif) VALUES
-    ('DIALLO', 'Amadou', 'Directeur Général', 'Colonel', 1, 1),
-    ('SOW', 'Fatoumata', 'Secrétaire Général', 'Commissaire Divisionnaire', 2, 1),
-    ('BA', 'Mamadou', 'Directeur Administratif et Financier', 'Contrôleur Général', 3, 1);
+INSERT OR IGNORE INTO signataires (nom, prenom, grade, fonction, titre, ordre_signature, actif) VALUES
+    ('BELEM', 'Abdoulaye', 'Commissaire Divisionnaire', 'Directeur Général', 'Chevalier de l'Ordre de l'Etalon', 1, 1),
+    ('SINDE', 'Salif', 'Commissaire Divisionnaire', 'Directeur de l'Administration des Finances', 'Chevalier de l'Ordre de l'Etalon', 2, 1),
+
 
 -- Entête (paramètres généraux) - logo en base64 vide au départ
 INSERT OR IGNORE INTO entete (cle, valeur) VALUES

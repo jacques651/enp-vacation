@@ -29,6 +29,7 @@ interface Signataire {
   id: number;
   nom: string;
   prenom: string;
+  grade: string;
   fonction: string;
   titre: string;
   ordre_signature: number;
@@ -40,6 +41,7 @@ interface Signataire {
 interface CreateSignataire {
   nom: string;
   prenom: string;
+  grade: string;
   fonction: string;
   titre: string;
   ordre_signature?: number;
@@ -54,7 +56,7 @@ export default function SignatairesManager() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [sortBy, setSortBy] = useState<'nom' | 'prenom' | 'fonction' | 'titre' | 'ordre_signature' | 'id'>('ordre_signature');
+  const [sortBy, setSortBy] = useState<'nom' | 'prenom'| 'grade' | 'fonction' | 'titre' | 'ordre_signature' | 'id'>('ordre_signature');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const itemsPerPage = 10;
 
@@ -62,6 +64,7 @@ export default function SignatairesManager() {
   const [formData, setFormData] = useState({
     nom: '',
     prenom: '',
+    grade: '',
     fonction: '',
     titre: '',
     ordre_signature: 1,
@@ -84,6 +87,7 @@ export default function SignatairesManager() {
       `${s.nom} ${s.prenom}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.nom.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.prenom.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.grade.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.fonction.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.titre.toLowerCase().includes(searchTerm.toLowerCase())
     );
@@ -96,6 +100,8 @@ export default function SignatairesManager() {
         comparison = a.nom.localeCompare(b.nom);
       } else if (sortBy === 'prenom') {
         comparison = a.prenom.localeCompare(b.prenom);
+      } else if (sortBy === 'grade') {
+        comparison = a.grade.localeCompare(b.grade);
       } else if (sortBy === 'fonction') {
         comparison = a.fonction.localeCompare(b.fonction);
       } else if (sortBy === 'titre') {
@@ -158,6 +164,7 @@ export default function SignatairesManager() {
     setFormData({
       nom: '',
       prenom: '',
+      grade: '',
       fonction: '',
       titre: '',
       ordre_signature: 1,
@@ -175,6 +182,7 @@ export default function SignatairesManager() {
     setFormData({
       nom: item.nom,
       prenom: item.prenom,
+      grade: item.grade,
       fonction: item.fonction,
       titre: item.titre,
       ordre_signature: item.ordre_signature,
@@ -191,6 +199,7 @@ export default function SignatairesManager() {
     const submitData = {
       nom: formData.nom.trim(),
       prenom: formData.prenom.trim(),
+      grade: formData.grade.trim(),
       fonction: formData.fonction.trim(),
       titre: formData.titre.trim(),
       ordre_signature: formData.ordre_signature,
@@ -198,13 +207,16 @@ export default function SignatairesManager() {
     };
 
     if (editingId) {
-      updateMutation.mutate({ id: editingId, ...submitData });
+      updateMutation.mutate({
+        id: editingId, ...submitData,
+        grade: ''
+      });
     } else {
       createMutation.mutate(submitData);
     }
   };
 
-  const handleSort = (column: 'id' | 'nom' | 'prenom' | 'fonction' | 'titre' | 'ordre_signature') => {
+  const handleSort = (column: 'id' | 'nom' | 'prenom' | 'grade' | 'fonction' | 'titre' | 'ordre_signature') => {
     if (sortBy === column) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {

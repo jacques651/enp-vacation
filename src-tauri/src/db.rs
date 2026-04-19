@@ -1,6 +1,7 @@
 // src-tauri/src/db.rs
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use sqlx::Row;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -37,6 +38,100 @@ pub async fn init_db(db_path: &Path) -> Result<SqlitePool, String> {
     init_schema(&pool).await?;
 
     Ok(pool)
+}
+
+async fn table_has_column(pool: &SqlitePool, table: &str, column: &str) -> Result<bool, String> {
+    let pragma = format!("PRAGMA table_info({table})");
+    let rows = sqlx::query(&pragma)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("Erreur lecture schema {table}: {e}"))?;
+
+    for row in rows {
+        let name: String = row
+            .try_get("name")
+            .map_err(|e| format!("Erreur lecture colonne {table}: {e}"))?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+async fn ensure_column(
+    pool: &SqlitePool,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    if table_has_column(pool, table, column).await? {
+        return Ok(());
+    }
+
+    let statement = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
+    sqlx::query(&statement)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Erreur migration {table}.{column}: {e}"))?;
+
+    Ok(())
+}
+
+async fn migrate_vacations_schema(pool: &SqlitePool) -> Result<(), String> {
+    let has_vhoraire = table_has_column(pool, "vacations", "vhoraire").await?;
+    let has_vht = table_has_column(pool, "vacations", "vht").await?;
+
+    if has_vhoraire && !has_vht {
+        ensure_column(pool, "vacations", "vht", "REAL").await?;
+    }
+
+    if has_vhoraire && table_has_column(pool, "vacations", "vht").await? {
+        sqlx::query("UPDATE vacations SET vht = nb_classe * vhoraire WHERE vht IS NULL")
+            .execute(pool)
+            .await
+            .map_err(|e| format!("Erreur migration vacations.vht: {e}"))?;
+    }
+
+    ensure_column(
+        pool,
+        "vacations",
+        "date_traitement",
+        "DATE DEFAULT CURRENT_DATE",
+    )
+    .await?;
+
+    sqlx::query(
+        "UPDATE vacations SET date_traitement = COALESCE(date_traitement, DATE('now')) WHERE date_traitement IS NULL",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| format!("Erreur migration vacations.date_traitement: {e}"))?;
+
+    Ok(())
+}
+
+async fn ensure_unique_index(
+    pool: &SqlitePool,
+    duplicate_query: &str,
+    create_index_query: &str,
+    duplicate_error: &str,
+) -> Result<(), String> {
+    let duplicate_groups: i64 = sqlx::query_scalar(duplicate_query)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if duplicate_groups > 0 {
+        return Err(duplicate_error.into());
+    }
+
+    sqlx::query(create_index_query)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 // =========================
@@ -163,8 +258,8 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
             actif INTEGER DEFAULT 1,
             date_debut DATE,
             date_fin DATE,
-            FOREIGN KEY (enseignant_id) REFERENCES enseignants(id),
-            FOREIGN KEY (banque_id) REFERENCES banques(id)
+            FOREIGN KEY (enseignant_id) REFERENCES enseignants(id) ON DELETE CASCADE,
+            FOREIGN KEY (banque_id) REFERENCES banques(id) ON DELETE CASCADE
         )
         "#,
     )
@@ -272,6 +367,7 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nom TEXT NOT NULL,
             prenom TEXT NOT NULL,
+            grade TEXT NOT NULL,
             fonction TEXT NOT NULL,
             titre TEXT NOT NULL,
             ordre_signature INTEGER NOT NULL DEFAULT 1,
@@ -302,6 +398,8 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
+
+    migrate_vacations_schema(pool).await?;
 
     // =========================
     // INDEX
@@ -353,13 +451,29 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
 
-    // =========================
-    // VUE (ETAT DE LIQUIDATION)
-    // =========================
-    sqlx::query("DROP VIEW IF EXISTS v_etat_liquidation")
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    ensure_unique_index(
+        pool,
+        "SELECT COUNT(*) FROM (SELECT designation FROM cycles GROUP BY designation HAVING COUNT(*) > 1)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_cycles_designation_unique ON cycles(designation)",
+        "Des doublons existent dans cycles.designation. Nettoyez-les avant de relancer l'application.",
+    )
+    .await?;
+
+    ensure_unique_index(
+        pool,
+        "SELECT COUNT(*) FROM (SELECT designation, cycle_id FROM modules GROUP BY designation, cycle_id HAVING COUNT(*) > 1)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_modules_designation_cycle_unique ON modules(designation, cycle_id)",
+        "Des doublons existent dans modules(designation, cycle_id). Nettoyez-les avant de relancer l'application.",
+    )
+    .await?;
+
+    ensure_unique_index(
+        pool,
+        "SELECT COUNT(*) FROM (SELECT designation, module_id FROM matieres GROUP BY designation, module_id HAVING COUNT(*) > 1)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_matieres_designation_module_unique ON matieres(designation, module_id)",
+        "Des doublons existent dans matieres(designation, module_id). Nettoyez-les avant de relancer l'application.",
+    )
+    .await?;
 
     // =========================
     // VUE (ETAT DE LIQUIDATION)
@@ -432,10 +546,9 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     // Signataires
     sqlx::query(
         r#"
-        INSERT OR IGNORE INTO signataires (nom, prenom, fonction, titre, ordre_signature, actif) VALUES
-            ('DIALLO', 'Amadou', 'Directeur Général', 'Colonel', 1, 1),
-            ('SOW', 'Fatoumata', 'Secrétaire Général', 'Commissaire Divisionnaire', 2, 1),
-            ('BA', 'Mamadou', 'Directeur Administratif et Financier', 'Contrôleur Général', 3, 1)
+        INSERT OR IGNORE INTO signataires (nom, prenom, grade, fonction, titre, ordre_signature, actif) VALUES
+    ('BELEM', 'Abdoulaye', 'Commissaire Divisionnaire', 'Directeur Général', 'Chevalier de l'Ordre de l'Etalon', 1, 1),
+    ('SINDE', 'Salif', 'Commissaire Divisionnaire', 'Directeur de l'Administration des Finances', 'Chevalier de l'Ordre de l'Etalon', 2, 1),
         "#
     ).execute(pool).await.map_err(|e| e.to_string())?;
 
