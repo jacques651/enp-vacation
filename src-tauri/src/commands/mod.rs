@@ -14,13 +14,14 @@ pub mod matieres;
 
 pub mod enseignants;
 pub mod banques;
+pub mod comptes_bancaires;
 
 // =========================
 // 🎓 STRUCTURE ACADÉMIQUE
 // =========================
 
 pub mod promotions;
-pub mod annees_scolaires; // ✅ AJOUT IMPORTANT
+pub mod annees_scolaires;
 pub mod plafonds;
 
 // =========================
@@ -56,12 +57,11 @@ pub mod entete;
 pub mod imports;
 pub mod utils;
 
-pub mod comptes_bancaires;
 // =========================
 // 🔁 EXPORT GLOBAL DES COMMANDES
 // =========================
 
-// pédagogie
+// Pédagogie
 pub use cycles::*;
 pub use modules::*;
 pub use matieres::*;
@@ -69,28 +69,27 @@ pub use matieres::*;
 // RH
 pub use enseignants::*;
 pub use banques::*;
+pub use comptes_bancaires::*;
 
-// académique
+// Académique
 pub use promotions::*;
-pub use annees_scolaires::*; // ✅ AJOUT IMPORTANT
+pub use annees_scolaires::*;
 pub use plafonds::*;
 
-// coeur métier
+// Cœur métier
 pub use vacation_secure::*;
 
-// finance
+// Finance
 pub use ordres_virement::*;
 pub use etat_liquidation::*;
 
-// analytics
+// Analytics
 pub use dashboard::*;
 
-// config
+// Configuration
 pub use signataires::*;
 pub use entete::*;
 
-// outils
+// Outils
 pub use imports::*;
 pub use utils::*;
-
-pub use comptes_bancaires::*;

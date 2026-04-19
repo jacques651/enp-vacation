@@ -37,6 +37,8 @@ interface ExtraData {
     delete?: string;
     search?: string;
   };
+  // Champs supplémentaires pour la validation
+  additionalValidate?: Record<string, (value: any) => string | null>;
 }
 
 interface ManagerProps<T> {
@@ -50,6 +52,8 @@ interface ManagerProps<T> {
   extraData?: ExtraData;
   transformData?: (values: any) => any;
   useSearch?: boolean; // Activer/désactiver la recherche
+  usePagination?: boolean; // Activer/désactiver la pagination
+  itemsPerPageOptions?: string[]; // Options pour les lignes par page
 }
 
 // ================= COMPONENT =================
@@ -64,10 +68,12 @@ function CrudManager<T extends { id: number }>({
   extraData,
   transformData,
   useSearch = true,
+  usePagination = true,
+  itemsPerPageOptions = ['10', '25', '50', '100'],
 }: ManagerProps<T>) {
   const queryClient = useQueryClient();
 
-  const singular = entity.endsWith("s") ? entity.slice(0, -1) : entity;
+  const singular = entity.endsWith('s') ? entity.slice(0, -1) : entity;
 
   // ================= STATE =================
   const [modal, setModal] = useState(false);
@@ -85,49 +91,83 @@ function CrudManager<T extends { id: number }>({
       return extraData.customCommands[type]!;
     }
 
-    // Mapping par défaut
+    // Mapping par défaut basé sur le schema.sql
     const commandMap: Record<string, Record<string, string>> = {
       get: {
-        'enseignants': 'get_enseignants',
+        'annees_scolaires': 'get_annees_scolaires',
+        'promotions': 'get_promotions',
         'cycles': 'get_cycles',
         'modules': 'get_modules',
         'matieres': 'get_matieres',
+        'enseignants': 'get_enseignants',
         'banques': 'get_banques',
-        'promotions': 'get_promotions',
+        'comptes_bancaires': 'get_comptes_bancaires',
         'plafonds': 'get_plafonds',
-        'entete': 'get_entetes',
+        'vacations': 'get_vacations',
+        'ordres_virement': 'get_ordres_virement',
       },
       create: {
-        'entete': 'set_entete_value', // Cas spécial pour entete (UPSERT)
+        'annees_scolaires': 'create_annee_scolaire',
+        'promotions': 'create_promotion',
+        'cycles': 'create_cycle',
+        'modules': 'create_module',
+        'matieres': 'create_matiere',
+        'enseignants': 'create_enseignant',
+        'banques': 'create_banque',
+        'comptes_bancaires': 'create_compte_bancaire',
+        'plafonds': 'create_plafond',
+        'vacations': 'create_vacation',
+        'ordres_virement': 'create_ordre_virement',
       },
       update: {
-        'entete': 'set_entete_value', // Cas spécial pour entete (UPSERT)
+        'annees_scolaires': 'update_annee_scolaire',
+        'promotions': 'update_promotion',
+        'cycles': 'update_cycle',
+        'modules': 'update_module',
+        'matieres': 'update_matiere',
+        'enseignants': 'update_enseignant',
+        'banques': 'update_banque',
+        'comptes_bancaires': 'update_compte_bancaire',
+        'plafonds': 'update_plafond',
+        'vacations': 'update_vacation',
+        'ordres_virement': 'update_ordre_virement',
       },
       delete: {
-        'entete': 'delete_entete',
+        'annees_scolaires': 'delete_annee_scolaire',
+        'promotions': 'delete_promotion',
+        'cycles': 'delete_cycle',
+        'modules': 'delete_module',
+        'matieres': 'delete_matiere',
+        'enseignants': 'delete_enseignant',
+        'banques': 'delete_banque',
+        'comptes_bancaires': 'delete_compte_bancaire',
+        'plafonds': 'delete_plafond',
+        'vacations': 'delete_vacation',
+        'ordres_virement': 'delete_ordre_virement',
       },
       search: {
         'promotions': 'search_promotions',
+        'enseignants': 'search_enseignants',
+        'matieres': 'search_matieres',
+        'modules': 'search_modules',
       }
     };
 
-    if (type === 'get') {
-      return commandMap.get[entity] || `get_${entity}`;
+    // Retourner la commande correspondante ou la commande par défaut
+    if (commandMap[type] && commandMap[type][entity]) {
+      return commandMap[type][entity];
     }
-    if (type === 'create') {
-      return commandMap.create[entity] || `create_${singular}`;
-    }
-    if (type === 'update') {
-      return commandMap.update[entity] || `update_${singular}`;
-    }
-    if (type === 'delete') {
-      return commandMap.delete[entity] || `delete_${singular}`;
-    }
-    if (type === 'search') {
-      return commandMap.search[entity] || `search_${entity}`;
-    }
+
+    // Commande par défaut
+    const defaultCommands: Record<string, string> = {
+      get: `get_${entity}`,
+      create: `create_${singular}`,
+      update: `update_${singular}`,
+      delete: `delete_${singular}`,
+      search: `search_${entity}`,
+    };
     
-    return `get_${entity}`;
+    return defaultCommands[type] || `get_${entity}`;
   };
 
   // ================= FETCH DATA =================
@@ -171,16 +211,21 @@ function CrudManager<T extends { id: number }>({
     : data;
 
   // ================= PAGINATION =================
-  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
-  const paginatedData = filteredData.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
+  const totalPages = usePagination ? Math.ceil(filteredData.length / itemsPerPage) : 1;
+  const paginatedData = usePagination
+    ? filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+    : filteredData;
 
   // ================= FORM =================
+  // Fusionner la validation par défaut avec la validation supplémentaire
+  const mergedValidate = {
+    ...validate,
+    ...extraData?.additionalValidate,
+  };
+
   const form = useForm({ 
     initialValues, 
-    validate,
+    validate: mergedValidate,
     validateInputOnBlur: true,
   });
 
@@ -209,46 +254,38 @@ function CrudManager<T extends { id: number }>({
         dataToSend = transform(values);
       }
 
-      const isEntete = entity === 'entete';
-      
-      if (editing) {
-        // Cas spécial pour UPSERT (entete)
-        if (isEntete) {
-          await invoke(getCommandName('update'), {
-            cle: editing.id, // Pour entete, l'ID est en fait la clé
-            valeur: dataToSend.valeur,
-          });
-        } else {
-          await invoke(getCommandName('update'), {
-            id: editing.id,
-            data: dataToSend,
-          });
+      // Nettoyer les données (enlever les champs undefined)
+      Object.keys(dataToSend).forEach(key => {
+        if (dataToSend[key] === undefined) {
+          delete dataToSend[key];
         }
+      });
+
+      if (editing) {
+        // Mise à jour
+        await invoke(getCommandName('update'), {
+          id: editing.id,
+          data: dataToSend,
+        });
         notifications.show({
           title: "Succès",
-          message: `${title} modifié avec succès`,
+          message: `${title} modifié${title.endsWith('e') ? 'e' : ''} avec succès`,
           color: "green",
         });
       } else {
         // Création
-        if (isEntete) {
-          await invoke(getCommandName('create'), {
-            cle: dataToSend.cle,
-            valeur: dataToSend.valeur,
-          });
-        } else {
-          await invoke(getCommandName('create'), {
-            data: dataToSend,
-          });
-        }
+        await invoke(getCommandName('create'), {
+          data: dataToSend,
+        });
         notifications.show({
           title: "Succès",
-          message: `${title} créé avec succès`,
+          message: `${title} créé${title.endsWith('e') ? 'e' : ''} avec succès`,
           color: "green",
         });
       }
 
       setModal(false);
+      form.reset();
       await queryClient.invalidateQueries({ queryKey: [entity] });
       refetch();
 
@@ -268,16 +305,11 @@ function CrudManager<T extends { id: number }>({
     try {
       setDeleteLoading(true);
       
-      const isEntete = entity === 'entete';
-      if (isEntete) {
-        await invoke(getCommandName('delete'), { id: deleteId });
-      } else {
-        await invoke(getCommandName('delete'), { id: deleteId });
-      }
+      await invoke(getCommandName('delete'), { id: deleteId });
 
       notifications.show({
         title: "Succès",
-        message: `${title} supprimé avec succès`,
+        message: `${title} supprimé${title.endsWith('e') ? 'e' : ''} avec succès`,
         color: "green",
       });
 
@@ -335,13 +367,15 @@ function CrudManager<T extends { id: number }>({
           <Table.Tbody>
             {paginatedData.length === 0 ? (
               <Table.Tr>
-                <Table.Td colSpan={columns.length + 2} align="center">
+                <Table.Td colSpan={columns.length + 2} style={{ textAlign: "center" }}>
                   <Text c="dimmed" py="xl">Aucune donnée trouvée</Text>
                 </Table.Td>
               </Table.Tr>
             ) : (
               paginatedData.map((item: T, index: number) => {
-                const globalIndex = (currentPage - 1) * itemsPerPage + index + 1;
+                const globalIndex = usePagination 
+                  ? (currentPage - 1) * itemsPerPage + index + 1
+                  : index + 1;
                 return (
                   <Table.Tr key={item.id}>
                     <Table.Td>{globalIndex}</Table.Td>
@@ -354,6 +388,7 @@ function CrudManager<T extends { id: number }>({
                           variant="subtle" 
                           color="blue" 
                           onClick={() => openEdit(item)}
+                          aria-label="Modifier"
                         >
                           <IconEdit size={16} />
                         </ActionIcon>
@@ -361,6 +396,7 @@ function CrudManager<T extends { id: number }>({
                           variant="subtle" 
                           color="red" 
                           onClick={() => setDeleteId(item.id)}
+                          aria-label="Supprimer"
                         >
                           <IconTrash size={16} />
                         </ActionIcon>
@@ -374,7 +410,7 @@ function CrudManager<T extends { id: number }>({
         </Table>
       </Paper>
 
-      {totalPages > 1 && (
+      {usePagination && totalPages > 1 && (
         <Group justify="space-between" mt="md">
           <Select
             label="Lignes par page"
@@ -383,7 +419,7 @@ function CrudManager<T extends { id: number }>({
               setItemsPerPage(Number(val));
               setCurrentPage(1);
             }}
-            data={['10', '25', '50', '100']}
+            data={itemsPerPageOptions}
             style={{ width: 150 }}
           />
           <Pagination

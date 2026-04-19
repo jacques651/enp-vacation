@@ -17,11 +17,14 @@ import {
   LoadingOverlay,
   Modal,
   Pagination,
+  NumberInput,
+  Switch,
 } from '@mantine/core';
-import { IconSignature, IconCheck, IconAlertCircle, IconEdit, IconTrash, IconPlus, IconSearch } from '@tabler/icons-react';
+import { IconSignature, IconCheck, IconAlertCircle, IconEdit, IconTrash, IconPlus, IconSearch, IconTableImport } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
+// ================= TYPES (ALIGNÉS AVEC DB.RS) =================
 interface Signataire {
   id: number;
   nom: string;
@@ -29,6 +32,10 @@ interface Signataire {
   grade: string;
   fonction: string;
   titre: string;
+  ordre_signature: number;
+  actif: number;
+  created_at: string;
+  updated_at: string;
 }
 
 interface CreateSignataire {
@@ -37,8 +44,11 @@ interface CreateSignataire {
   grade: string;
   fonction: string;
   titre: string;
+  ordre_signature?: number;
+  actif?: number;
 }
 
+// ================= COMPONENT =================
 export default function SignatairesManager() {
   const queryClient = useQueryClient();
   const [modalOpened, setModalOpened] = useState(false);
@@ -46,7 +56,7 @@ export default function SignatairesManager() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [sortBy, setSortBy] = useState<'nom' | 'prenom' | 'grade' | 'fonction' | 'id'>('nom');
+  const [sortBy, setSortBy] = useState<'nom' | 'prenom'| 'grade' | 'fonction' | 'titre' | 'ordre_signature' | 'id'>('ordre_signature');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const itemsPerPage = 10;
 
@@ -57,6 +67,8 @@ export default function SignatairesManager() {
     grade: '',
     fonction: '',
     titre: '',
+    ordre_signature: 1,
+    actif: true,
   });
 
   // Récupérer tous les signataires
@@ -71,14 +83,15 @@ export default function SignatairesManager() {
 
   // Filtrer et trier les données
   const filteredAndSortedData = useMemo(() => {
-    // Filtrage par recherche (sur nom et prénom)
     let filtered = signataires.filter(s =>
       `${s.nom} ${s.prenom}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.nom.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.prenom.toLowerCase().includes(searchTerm.toLowerCase())
+      s.prenom.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.grade.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.fonction.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.titre.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    // Tri
     return [...filtered].sort((a, b) => {
       let comparison = 0;
       if (sortBy === 'id') {
@@ -91,6 +104,10 @@ export default function SignatairesManager() {
         comparison = a.grade.localeCompare(b.grade);
       } else if (sortBy === 'fonction') {
         comparison = a.fonction.localeCompare(b.fonction);
+      } else if (sortBy === 'titre') {
+        comparison = a.titre.localeCompare(b.titre);
+      } else if (sortBy === 'ordre_signature') {
+        comparison = a.ordre_signature - b.ordre_signature;
       }
       return sortOrder === 'asc' ? comparison : -comparison;
     });
@@ -118,7 +135,7 @@ export default function SignatairesManager() {
 
   // Mettre à jour un signataire
   const updateMutation = useMutation({
-    mutationFn: ({ id, ...data }: { id: number } & CreateSignataire) => 
+    mutationFn: ({ id, ...data }: { id: number } & CreateSignataire) =>
       invoke('update_signataire', { id, data }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['signataires'] });
@@ -150,6 +167,8 @@ export default function SignatairesManager() {
       grade: '',
       fonction: '',
       titre: '',
+      ordre_signature: 1,
+      actif: true,
     });
   };
 
@@ -165,22 +184,39 @@ export default function SignatairesManager() {
       prenom: item.prenom,
       grade: item.grade,
       fonction: item.fonction,
-      titre: item.titre || '',
+      titre: item.titre,
+      ordre_signature: item.ordre_signature,
+      actif: item.actif === 1,
     });
     setModalOpened(true);
   };
 
   const handleSubmit = () => {
-    if (!formData.nom.trim() || !formData.prenom.trim()) return;
+    if (!formData.nom.trim() || !formData.prenom.trim() || !formData.fonction.trim() || !formData.titre.trim()) {
+      return;
+    }
+
+    const submitData = {
+      nom: formData.nom.trim(),
+      prenom: formData.prenom.trim(),
+      grade: formData.grade.trim(),
+      fonction: formData.fonction.trim(),
+      titre: formData.titre.trim(),
+      ordre_signature: formData.ordre_signature,
+      actif: formData.actif ? 1 : 0,
+    };
 
     if (editingId) {
-      updateMutation.mutate({ id: editingId, ...formData });
+      updateMutation.mutate({
+        id: editingId, ...submitData,
+        grade: ''
+      });
     } else {
-      createMutation.mutate(formData);
+      createMutation.mutate(submitData);
     }
   };
 
-  const handleSort = (column: 'id' | 'nom' | 'prenom' | 'grade' | 'fonction') => {
+  const handleSort = (column: 'id' | 'nom' | 'prenom' | 'grade' | 'fonction' | 'titre' | 'ordre_signature') => {
     if (sortBy === column) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
@@ -211,17 +247,17 @@ export default function SignatairesManager() {
 
   return (
     <Stack p="md" gap="lg">
-      {/* HEADER */}
+      {/* HEADER - Même style que ImportExcel */}
       <Card withBorder radius="md" p="lg" bg="adminBlue.8">
         <Group justify="space-between">
           <Stack gap={2}>
             <Title order={2} c="white">Gestion des signataires</Title>
             <Text size="sm" c="gray.3">
-              {filteredAndSortedData.length} signataire{filteredAndSortedData.length > 1 ? 's' : ''} enregistré{filteredAndSortedData.length > 1 ? 's' : ''}
+              Gérez les personnes autorisées à signer les documents officiels
             </Text>
           </Stack>
           <ThemeIcon size={48} radius="md" color="white" variant="light">
-            <IconSignature size={28} />
+            <IconTableImport size={28} />
           </ThemeIcon>
         </Group>
       </Card>
@@ -234,7 +270,7 @@ export default function SignatairesManager() {
             <div>
               <Title order={4}>Signataires</Title>
               <Text size="sm" c="dimmed">
-                Gérez les personnes autorisées à signer les documents officiels
+                {filteredAndSortedData.length} signataire{filteredAndSortedData.length > 1 ? 's' : ''} enregistré{filteredAndSortedData.length > 1 ? 's' : ''}
               </Text>
             </div>
             <Button
@@ -251,7 +287,7 @@ export default function SignatairesManager() {
 
           {/* RECHERCHE */}
           <TextInput
-            placeholder="Rechercher par nom ou prénom..."
+            placeholder="Rechercher par nom, prénom, fonction ou titre..."
             leftSection={<IconSearch size={16} />}
             value={searchTerm}
             onChange={(e) => {
@@ -271,51 +307,43 @@ export default function SignatairesManager() {
                 <Table striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
-                      <Table.Th 
+                      <Table.Th
                         style={{ width: 70, cursor: 'pointer' }}
                         onClick={() => handleSort('id')}
                       >
-                        <Group gap={4}>
-                          N°
-                          <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
-                        </Group>
+                        N°
                       </Table.Th>
-                      <Table.Th 
+                      <Table.Th
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => handleSort('ordre_signature')}
+                      >
+                        Ordre
+                      </Table.Th>
+                      <Table.Th
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleSort('nom')}
                       >
-                        <Group gap={4}>
-                          Nom
-                          <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
-                        </Group>
+                        Nom
                       </Table.Th>
-                      <Table.Th 
+                      <Table.Th
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleSort('prenom')}
                       >
-                        <Group gap={4}>
-                          Prénom
-                          <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
-                        </Group>
+                        Prénom
                       </Table.Th>
-                      <Table.Th 
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => handleSort('grade')}
-                      >
-                        <Group gap={4}>
-                          Grade
-                          <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
-                        </Group>
-                      </Table.Th>
-                      <Table.Th 
+                      <Table.Th
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleSort('fonction')}
                       >
-                        <Group gap={4}>
-                          Fonction
-                          <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
-                        </Group>
+                        Fonction
                       </Table.Th>
+                      <Table.Th
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => handleSort('titre')}
+                      >
+                        Titre
+                      </Table.Th>
+                      <Table.Th style={{ width: 80, textAlign: 'center' }}>Statut</Table.Th>
                       <Table.Th style={{ width: 100, textAlign: 'center' }}>Actions</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
@@ -330,6 +358,11 @@ export default function SignatairesManager() {
                             </Badge>
                           </Table.Td>
                           <Table.Td>
+                            <Badge color="violet" variant="light" size="sm">
+                              {item.ordre_signature}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
                             <Text size="sm" fw={500}>
                               {item.nom}
                             </Text>
@@ -341,12 +374,21 @@ export default function SignatairesManager() {
                           </Table.Td>
                           <Table.Td>
                             <Badge color="cyan" variant="light" size="sm">
-                              {item.grade}
+                              {item.fonction}
                             </Badge>
                           </Table.Td>
                           <Table.Td>
                             <Badge color="blue" variant="light" size="sm">
-                              {item.fonction}
+                              {item.titre}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td style={{ textAlign: 'center' }}>
+                            <Badge
+                              color={item.actif === 1 ? 'green' : 'red'}
+                              variant="light"
+                              size="sm"
+                            >
+                              {item.actif === 1 ? 'Actif' : 'Inactif'}
                             </Badge>
                           </Table.Td>
                           <Table.Td>
@@ -377,22 +419,15 @@ export default function SignatairesManager() {
               {/* PAGINATION */}
               {totalPages > 1 && (
                 <Group justify="center" mt="md">
-                  <Pagination 
-                    value={currentPage} 
-                    onChange={setCurrentPage} 
-                    total={totalPages} 
+                  <Pagination
+                    value={currentPage}
+                    onChange={setCurrentPage}
+                    total={totalPages}
                     color="blue"
                   />
                 </Group>
               )}
             </>
-          )}
-
-          {/* MESSAGE DE SUCCÈS */}
-          {(createMutation.isSuccess || updateMutation.isSuccess) && (
-            <Alert icon={<IconCheck size={16} />} color="green" variant="light">
-              Signataire {createMutation.isSuccess ? 'ajouté' : 'modifié'} avec succès
-            </Alert>
           )}
         </Stack>
       </Card>
@@ -408,9 +443,19 @@ export default function SignatairesManager() {
         size="md"
       >
         <Stack gap="md">
+          <NumberInput
+            label="Ordre de signature"
+            placeholder="Ex: 1"
+            value={formData.ordre_signature}
+            onChange={(val) => setFormData({ ...formData, ordre_signature: Number(val) || 1 })}
+            withAsterisk
+            description="Ordre de signature (1 = premier signataire)"
+            min={1}
+          />
+
           <TextInput
             label="Nom"
-            placeholder="Ex: KORGO"
+            placeholder="Ex: DIALLO"
             value={formData.nom}
             onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
             withAsterisk
@@ -419,7 +464,7 @@ export default function SignatairesManager() {
 
           <TextInput
             label="Prénom"
-            placeholder="Ex: Jacques"
+            placeholder="Ex: Amadou"
             value={formData.prenom}
             onChange={(e) => setFormData({ ...formData, prenom: e.target.value })}
             withAsterisk
@@ -427,17 +472,8 @@ export default function SignatairesManager() {
           />
 
           <TextInput
-            label="Grade"
-            placeholder="Ex: Commissaire Divisionnaire, Contrôleur Général..."
-            value={formData.grade}
-            onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
-            withAsterisk
-            description="Grade administratif ou policier"
-          />
-
-          <TextInput
             label="Fonction"
-            placeholder="Ex: Directeur gérnéral, Chef de Division..."
+            placeholder="Ex: Directeur Général"
             value={formData.fonction}
             onChange={(e) => setFormData({ ...formData, fonction: e.target.value })}
             withAsterisk
@@ -446,10 +482,19 @@ export default function SignatairesManager() {
 
           <TextInput
             label="Titre"
-            placeholder="Ex: Dr, Pr, Colonel..."
+            placeholder="Ex: Colonel"
             value={formData.titre}
             onChange={(e) => setFormData({ ...formData, titre: e.target.value })}
-            description="Titre honorifique (optionnel)"
+            withAsterisk
+            description="Titre ou grade du signataire"
+          />
+
+          <Switch
+            label="Actif"
+            description="Un signataire inactif ne peut pas signer de documents"
+            checked={formData.actif}
+            onChange={(e) => setFormData({ ...formData, actif: e.currentTarget.checked })}
+            size="md"
           />
 
           <Group justify="flex-end" mt="md">
@@ -461,7 +506,7 @@ export default function SignatairesManager() {
               loading={createMutation.isPending || updateMutation.isPending}
               variant="gradient"
               gradient={{ from: 'blue', to: 'cyan' }}
-              disabled={!formData.nom.trim() || !formData.prenom.trim()}
+              disabled={!formData.nom.trim() || !formData.prenom.trim() || !formData.fonction.trim() || !formData.titre.trim()}
             >
               {editingId ? 'Mettre à jour' : 'Ajouter'}
             </Button>
@@ -502,9 +547,9 @@ export default function SignatairesManager() {
         <Title order={5} mb="md">📋 Instructions</Title>
         <Stack gap="xs">
           <Text size="sm">1. Les signataires sont les personnes habilitées à signer les documents officiels</Text>
-          <Text size="sm">2. Renseignez le grade et la fonction pour l'identification officielle</Text>
-          <Text size="sm">3. Le titre est la distinction honorifique du signataire (ex: Chevalier de l'Ordre de l'Etalon)</Text>
-          <Text size="sm">4. Les signataires apparaîtront sur les états de liquidation</Text>
+          <Text size="sm">2. L'ordre de signature détermine l'ordre de priorité (1 = premier signataire)</Text>
+          <Text size="sm">3. Renseignez la fonction et le titre pour l'identification officielle</Text>
+          <Text size="sm">4. Seuls les signataires actifs apparaîtront dans les listes de signature</Text>
           <Text size="sm">5. Utilisez la recherche pour trouver rapidement un signataire</Text>
         </Stack>
       </Card>

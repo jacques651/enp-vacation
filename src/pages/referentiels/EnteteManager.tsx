@@ -301,6 +301,8 @@ export default function EnteteManager() {
             Autres
           </Tabs.Tab>
         </Tabs.List>
+      </Tabs>
+
       {/* Onglet Informations */}
       <Tabs.Panel value="informations">
         <Card withBorder radius="md" p="lg">
@@ -360,7 +362,7 @@ export default function EnteteManager() {
                     gradient={{ from: 'blue', to: 'cyan' }}
                     leftSection={<IconCheck size={16} />}
                   >
-                  Enregistrer
+                    Enregistrer
                   </Button>
                 </Group>
               </Stack>
@@ -584,7 +586,6 @@ export default function EnteteManager() {
           </Stack>
         </Card>
       </Tabs.Panel>
-      </Tabs>
 
       {/* Section Aperçu */}
       <Card withBorder radius="md" p="lg">
