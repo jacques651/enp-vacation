@@ -35,12 +35,106 @@ pub async fn init_db(db_path: &Path) -> Result<SqlitePool, String> {
         .map_err(|e| e.to_string())?;
 
     init_schema(&pool).await?;
+    
+    // Exécuter les migrations
+    run_migrations(&pool).await?;
 
     Ok(pool)
 }
 
 // =========================
-// SCHEMA
+// MIGRATIONS
+// =========================
+async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
+    // Créer une table pour suivre les migrations si elle n'existe pas
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| format!("Erreur création table migrations: {}", e))?;
+
+    // Migration 1: Ajouter la colonne grade à signataires
+    migrate_signataires_add_grade(pool).await?;
+    
+    // Ajouter d'autres migrations ici si nécessaire
+    // migrate_autre_chose(pool).await?;
+
+    Ok(())
+}
+
+// =========================
+// UTILITAIRE: Vérifier si une colonne existe
+// =========================
+async fn table_has_column(pool: &SqlitePool, table: &str, column: &str) -> Result<bool, String> {
+    let query = format!("PRAGMA table_info({})", table);
+    let rows: Vec<(i32, String, String, i32, Option<String>, i32)> = 
+        sqlx::query_as(&query)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| format!("Erreur lecture schéma: {}", e))?;
+    
+    Ok(rows.iter().any(|row| row.1 == column))
+}
+
+// =========================
+// MIGRATION: Ajouter grade à signataires
+// =========================
+async fn migrate_signataires_add_grade(pool: &SqlitePool) -> Result<(), String> {
+    // Vérifier si la migration a déjà été appliquée
+    let already_applied: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM migrations WHERE name = ?"
+    )
+    .bind("add_grade_to_signataires")
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if already_applied > 0 {
+        println!("⏭️ Migration 'add_grade_to_signataires' déjà appliquée");
+        return Ok(());
+    }
+
+    let has_column = table_has_column(pool, "signataires", "grade").await?;
+
+    if !has_column {
+        println!("🔧 Migration: Ajout de la colonne 'grade' à la table signataires...");
+        
+        sqlx::query("ALTER TABLE signataires ADD COLUMN grade TEXT")
+            .execute(pool)
+            .await
+            .map_err(|e| format!("Erreur ajout colonne grade: {e}"))?;
+        
+        // Marquer la migration comme appliquée
+        sqlx::query("INSERT INTO migrations (name) VALUES (?)")
+            .bind("add_grade_to_signataires")
+            .execute(pool)
+            .await
+            .map_err(|e| format!("Erreur enregistrement migration: {e}"))?;
+        
+        println!("✅ Migration 'add_grade_to_signataires' appliquée avec succès");
+    } else {
+        println!("ℹ️ La colonne 'grade' existe déjà dans signataires");
+        
+        // Marquer quand même la migration comme appliquée si elle n'existe pas
+        sqlx::query("INSERT OR IGNORE INTO migrations (name) VALUES (?)")
+            .bind("add_grade_to_signataires")
+            .execute(pool)
+            .await
+            .map_err(|e| format!("Erreur enregistrement migration: {e}"))?;
+    }
+
+    Ok(())
+}
+
+// =========================
+// SCHEMA INITIAL
 // =========================
 async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     sqlx::query("PRAGMA foreign_keys = ON")
@@ -265,14 +359,13 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    // Signataires - CORRECTION : grade devient nullable
+    // Signataires
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS signataires (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nom TEXT NOT NULL,
             prenom TEXT NOT NULL,
-            grade TEXT,  -- Changé de NOT NULL à nullable
             fonction TEXT NOT NULL,
             titre TEXT NOT NULL,
             ordre_signature INTEGER NOT NULL DEFAULT 1,
@@ -288,7 +381,7 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    // Entete (paramètres généraux) - Stockage du logo en base64
+    // Entete (paramètres généraux)
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS entete (
@@ -401,7 +494,7 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
-    
+
     // =========================
     // DONNEES INITIALES
     // =========================
@@ -423,16 +516,16 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    // Signataires - CORRECTION : ajout des valeurs avec grade nullable
+    // Signataires (sans grade pour l'instant)
     sqlx::query(
         r#"
-        INSERT OR IGNORE INTO signataires (nom, prenom, grade, fonction, titre, ordre_signature, actif) VALUES
-            ('BELEM', 'Abdoulaye', 'Commissaire Divisionnaire de Police', 'Directeur Général', 'Directeur Général', 1, 1),
-            ('SINDE', 'Salif', 'Commissaire Divisionnaire de Police', 'Directeur de l''Administration des Finances', 'Directeur Administratif et Financier', 2, 1)
+        INSERT OR IGNORE INTO signataires (nom, prenom, fonction, titre, ordre_signature, actif) VALUES
+            ('BELEM', 'Abdoulaye', 'Directeur Général', 'Directeur Général', 1, 1),
+            ('SINDE', 'Salif', 'Directeur de l''Administration des Finances', 'Directeur Administratif et Financier', 2, 1)
         "#,
     ).execute(pool).await.map_err(|e| e.to_string())?;
 
-    // Entete (paramètres généraux) - logo en base64 vide au départ
+    // Entete
     sqlx::query(
         r#"
         INSERT OR IGNORE INTO entete (cle, valeur) VALUES
