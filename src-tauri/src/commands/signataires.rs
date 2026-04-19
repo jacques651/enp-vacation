@@ -15,7 +15,8 @@ pub struct Signataire {
     pub id: i32,
     pub nom: String,
     pub prenom: String,
-    pub fonction: String,        // fonction avant titre
+    pub grade: Option<String>,
+    pub fonction: String,        // fonction après grade
     pub titre: String,           // titre après fonction
     pub ordre_signature: i32,
     pub actif: i32,
@@ -31,7 +32,8 @@ pub struct Signataire {
 pub struct CreateSignataire {
     pub nom: String,
     pub prenom: String,
-    pub fonction: String,        // fonction avant titre
+    pub grade: Option<String>,
+    pub fonction: String,        // fonction après grade
     pub titre: String,
     pub ordre_signature: Option<i32>,
     pub actif: Option<i32>,
@@ -41,7 +43,8 @@ pub struct CreateSignataire {
 pub struct UpdateSignataire {
     pub nom: Option<String>,
     pub prenom: Option<String>,
-    pub fonction: Option<String>, // fonction avant titre
+    pub grade: Option<String>,
+    pub fonction: Option<String>, // fonction après grade
     pub titre: Option<String>,
     pub ordre_signature: Option<i32>,
     pub actif: Option<i32>,
@@ -51,13 +54,19 @@ pub struct UpdateSignataire {
 // VALIDATION
 // =========================
 
-fn validate(nom: &str, prenom: &str, fonction: &str, titre: &str) -> Result<(), String> {
+fn validate(nom: &str, prenom: &str, grade: &Option<String>, fonction: &str, titre: &str) -> Result<(), String> {
     if nom.trim().is_empty() {
         return Err("Le nom est obligatoire".into());
     }
 
     if prenom.trim().is_empty() {
         return Err("Le prénom est obligatoire".into());
+    }
+
+    if let Some(grade) = grade {
+        if grade.trim().is_empty() {
+            return Err("Le grade ne peut pas être vide s'il est fourni".into());
+        }
     }
 
     if fonction.trim().is_empty() {
@@ -81,7 +90,7 @@ pub async fn get_signataires(
 ) -> Result<Vec<Signataire>, String> {
 
     sqlx::query_as::<_, Signataire>(
-        "SELECT id, nom, prenom, fonction, titre, ordre_signature, actif, created_at, updated_at
+        "SELECT id, nom, prenom, grade, fonction, titre, ordre_signature, actif, created_at, updated_at
          FROM signataires 
          ORDER BY ordre_signature ASC, nom, prenom"
     )
@@ -100,7 +109,7 @@ pub async fn get_signataires_actifs(
 ) -> Result<Vec<Signataire>, String> {
 
     sqlx::query_as::<_, Signataire>(
-        "SELECT id, nom, prenom, fonction, titre, ordre_signature, actif, created_at, updated_at
+        "SELECT id, nom, prenom, grade, fonction, titre, ordre_signature, actif, created_at, updated_at
          FROM signataires 
          WHERE actif = 1
          ORDER BY ordre_signature ASC, nom, prenom"
@@ -121,7 +130,7 @@ pub async fn get_signataire_by_id(
 ) -> Result<Signataire, String> {
 
     sqlx::query_as::<_, Signataire>(
-        "SELECT id, nom, prenom, fonction, titre, ordre_signature, actif, created_at, updated_at
+        "SELECT id, nom, prenom, grade, fonction, titre, ordre_signature, actif, created_at, updated_at
          FROM signataires WHERE id = ?"
     )
     .bind(id)
@@ -140,7 +149,7 @@ pub async fn create_signataire(
     data: CreateSignataire,
 ) -> Result<Signataire, String> {
 
-    validate(&data.nom, &data.prenom, &data.fonction, &data.titre)?;
+    validate(&data.nom, &data.prenom, &data.grade, &data.fonction, &data.titre)?;
 
     let ordre_signature = data.ordre_signature.unwrap_or(1);
     let actif = data.actif.unwrap_or(1);
@@ -157,14 +166,15 @@ pub async fn create_signataire(
 
     let id: i32 = sqlx::query_scalar(
         r#"
-        INSERT INTO signataires (nom, prenom, fonction, titre, ordre_signature, actif, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        INSERT INTO signataires (nom, prenom, grade, fonction, titre, ordre_signature, actif, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING id
         "#
     )
     .bind(&data.nom)
     .bind(&data.prenom)
-    .bind(&data.fonction)
+    .bind(&data.grade)
+    .bind(&data.fonction)  // Correction : fonction après grade
     .bind(&data.titre)
     .bind(ordre_signature)
     .bind(actif)
@@ -190,10 +200,11 @@ pub async fn update_signataire(
 
     let nom = data.nom.unwrap_or(current.nom);
     let prenom = data.prenom.unwrap_or(current.prenom);
+    let grade = data.grade.or(current.grade);
     let fonction = data.fonction.unwrap_or(current.fonction);
     let titre = data.titre.unwrap_or(current.titre);
 
-    validate(&nom, &prenom, &fonction, &titre)?;
+    validate(&nom, &prenom, &grade, &fonction, &titre)?;
 
     let ordre_signature = data.ordre_signature.unwrap_or(current.ordre_signature);
     let actif = data.actif.unwrap_or(current.actif);
@@ -211,13 +222,14 @@ pub async fn update_signataire(
     sqlx::query(
         r#"
         UPDATE signataires
-        SET nom = ?, prenom = ?, fonction = ?, titre = ?, ordre_signature = ?, actif = ?, updated_at = CURRENT_TIMESTAMP
+        SET nom = ?, prenom = ?, grade = ?, fonction = ?, titre = ?, ordre_signature = ?, actif = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         "#
     )
     .bind(&nom)
     .bind(&prenom)
-    .bind(&fonction)
+    .bind(&grade)      // Correction : grade avant fonction
+    .bind(&fonction)   // Correction : fonction après grade
     .bind(&titre)
     .bind(ordre_signature)
     .bind(actif)
@@ -273,11 +285,12 @@ pub async fn search_signataires(
     let pattern = format!("%{}%", search);
 
     sqlx::query_as::<_, Signataire>(
-        "SELECT id, nom, prenom, fonction, titre, ordre_signature, actif, created_at, updated_at
+        "SELECT id, nom, prenom, grade, fonction, titre, ordre_signature, actif, created_at, updated_at
          FROM signataires 
-         WHERE nom LIKE ? OR prenom LIKE ? OR fonction LIKE ? OR titre LIKE ?
+         WHERE nom LIKE ? OR prenom LIKE ? OR grade LIKE ? OR fonction LIKE ? OR titre LIKE ?
          ORDER BY ordre_signature ASC, nom, prenom"
     )
+    .bind(&pattern)
     .bind(&pattern)
     .bind(&pattern)
     .bind(&pattern)

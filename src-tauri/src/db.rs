@@ -265,13 +265,14 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    // Signataires
+    // Signataires - CORRECTION : grade devient nullable
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS signataires (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nom TEXT NOT NULL,
             prenom TEXT NOT NULL,
+            grade TEXT,  -- Changé de NOT NULL à nullable
             fonction TEXT NOT NULL,
             titre TEXT NOT NULL,
             ordre_signature INTEGER NOT NULL DEFAULT 1,
@@ -361,14 +362,6 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
 
-    // =========================
-    // VUE (ETAT DE LIQUIDATION)
-    // =========================
-    sqlx::query("DROP VIEW IF EXISTS v_etat_liquidation")
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-
     sqlx::query(
         r#"
     CREATE VIEW v_etat_liquidation AS
@@ -391,7 +384,7 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
         (v.vht * v.taux_horaire * v.taux_retenue / 100) AS montant_retenu,
         (v.vht * v.taux_horaire * (1 - v.taux_retenue / 100)) AS montant_net,
         CAST(v.mois AS INTEGER) AS mois,
-        CAST(v.annee AS INTEGER) AS annee,  -- ← AJOUTER CE CAST
+        CAST(v.annee AS INTEGER) AS annee,
         a.libelle AS annee_scolaire,
         p.libelle AS promotion
     FROM vacations v
@@ -408,6 +401,7 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
+    
     // =========================
     // DONNEES INITIALES
     // =========================
@@ -429,14 +423,13 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    // Signataires
+    // Signataires - CORRECTION : ajout des valeurs avec grade nullable
     sqlx::query(
         r#"
-        INSERT OR IGNORE INTO signataires (nom, prenom, fonction, titre, ordre_signature, actif) VALUES
-            ('DIALLO', 'Amadou', 'Directeur Général', 'Colonel', 1, 1),
-            ('SOW', 'Fatoumata', 'Secrétaire Général', 'Commissaire Divisionnaire', 2, 1),
-            ('BA', 'Mamadou', 'Directeur Administratif et Financier', 'Contrôleur Général', 3, 1)
-        "#
+        INSERT OR IGNORE INTO signataires (nom, prenom, grade, fonction, titre, ordre_signature, actif) VALUES
+            ('BELEM', 'Abdoulaye', 'Commissaire Divisionnaire de Police', 'Directeur Général', 'Directeur Général', 1, 1),
+            ('SINDE', 'Salif', 'Commissaire Divisionnaire de Police', 'Directeur de l''Administration des Finances', 'Directeur Administratif et Financier', 2, 1)
+        "#,
     ).execute(pool).await.map_err(|e| e.to_string())?;
 
     // Entete (paramètres généraux) - logo en base64 vide au départ

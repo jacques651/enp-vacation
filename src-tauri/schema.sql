@@ -168,12 +168,13 @@ CREATE TABLE IF NOT EXISTS ordre_virement_lignes (
 );
 
 -- =====================================================
--- 6. SIGNAIRES
+-- 6. SIGNAIRES (CORRIGÉ)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS signataires (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nom TEXT NOT NULL,
     prenom TEXT NOT NULL,
+    grade TEXT NOT NULL,
     fonction TEXT NOT NULL,
     titre TEXT NOT NULL,
     ordre_signature INTEGER NOT NULL DEFAULT 1,
@@ -252,7 +253,7 @@ JOIN annees_scolaires a ON a.id = v.annee_scolaire_id
 JOIN promotions p ON p.id = v.promotion_id;
 
 -- =====================================================
--- 10. DONNEES INITIALES
+-- 10. DONNEES INITIALES (CORRIGÉES)
 -- =====================================================
 
 -- Plafonds
@@ -265,11 +266,10 @@ INSERT OR IGNORE INTO plafonds (titre, statut, volume_horaire_max) VALUES
     ('agent', 'externe', 180),
     ('retraité', 'externe', 200);
 
--- Signataires
-INSERT OR IGNORE INTO signataires (nom, prenom, fonction, titre, ordre_signature, actif) VALUES
-    ('DIALLO', 'Amadou', 'Directeur Général', 'Colonel', 1, 1),
-    ('SOW', 'Fatoumata', 'Secrétaire Général', 'Commissaire Divisionnaire', 2, 1),
-    ('BA', 'Mamadou', 'Directeur Administratif et Financier', 'Contrôleur Général', 3, 1);
+-- Signataires (CORRIGÉ)
+INSERT OR IGNORE INTO signataires (nom, prenom, grade, fonction, titre, ordre_signature, actif) VALUES
+    ('BELEM', 'Abdoulaye', 'Commissaire Divisionnaire de Police', 'Directeur Général', 'Directeur Général', 1, 1),
+    ('SINDE', 'Salif', 'Commissaire Divisionnaire de Police', 'Directeur de l''Administration des Finances', 'Directeur Administratif et Financier', 2, 1);
 
 -- Entête (paramètres généraux) - logo en base64 vide au départ
 INSERT OR IGNORE INTO entete (cle, valeur) VALUES

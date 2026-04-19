@@ -29,6 +29,7 @@ interface Signataire {
   id: number;
   nom: string;
   prenom: string;
+  grade: string | null;  // AJOUTÉ : grade peut être null
   fonction: string;
   titre: string;
   ordre_signature: number;
@@ -40,6 +41,7 @@ interface Signataire {
 interface CreateSignataire {
   nom: string;
   prenom: string;
+  grade?: string | null;  // AJOUTÉ : grade optionnel
   fonction: string;
   titre: string;
   ordre_signature?: number;
@@ -54,7 +56,7 @@ export default function SignatairesManager() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [sortBy, setSortBy] = useState<'nom' | 'prenom' | 'fonction' | 'titre' | 'ordre_signature' | 'id'>('ordre_signature');
+  const [sortBy, setSortBy] = useState<'nom' | 'prenom' | 'grade' | 'fonction' | 'titre' | 'ordre_signature' | 'id'>('ordre_signature');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const itemsPerPage = 10;
 
@@ -62,6 +64,7 @@ export default function SignatairesManager() {
   const [formData, setFormData] = useState({
     nom: '',
     prenom: '',
+    grade: '',
     fonction: '',
     titre: '',
     ordre_signature: 1,
@@ -84,6 +87,7 @@ export default function SignatairesManager() {
       `${s.nom} ${s.prenom}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.nom.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.prenom.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (s.grade && s.grade.toLowerCase().includes(searchTerm.toLowerCase())) ||
       s.fonction.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.titre.toLowerCase().includes(searchTerm.toLowerCase())
     );
@@ -96,6 +100,10 @@ export default function SignatairesManager() {
         comparison = a.nom.localeCompare(b.nom);
       } else if (sortBy === 'prenom') {
         comparison = a.prenom.localeCompare(b.prenom);
+      } else if (sortBy === 'grade') {
+        const gradeA = a.grade || '';
+        const gradeB = b.grade || '';
+        comparison = gradeA.localeCompare(gradeB);
       } else if (sortBy === 'fonction') {
         comparison = a.fonction.localeCompare(b.fonction);
       } else if (sortBy === 'titre') {
@@ -158,6 +166,7 @@ export default function SignatairesManager() {
     setFormData({
       nom: '',
       prenom: '',
+      grade: '',
       fonction: '',
       titre: '',
       ordre_signature: 1,
@@ -175,6 +184,7 @@ export default function SignatairesManager() {
     setFormData({
       nom: item.nom,
       prenom: item.prenom,
+      grade: item.grade || '',
       fonction: item.fonction,
       titre: item.titre,
       ordre_signature: item.ordre_signature,
@@ -191,6 +201,7 @@ export default function SignatairesManager() {
     const submitData = {
       nom: formData.nom.trim(),
       prenom: formData.prenom.trim(),
+      grade: formData.grade.trim() || null,  // Envoyer null si vide
       fonction: formData.fonction.trim(),
       titre: formData.titre.trim(),
       ordre_signature: formData.ordre_signature,
@@ -204,7 +215,7 @@ export default function SignatairesManager() {
     }
   };
 
-  const handleSort = (column: 'id' | 'nom' | 'prenom' | 'fonction' | 'titre' | 'ordre_signature') => {
+  const handleSort = (column: 'id' | 'nom' | 'prenom' | 'grade' | 'fonction' | 'titre' | 'ordre_signature') => {
     if (sortBy === column) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
@@ -275,7 +286,7 @@ export default function SignatairesManager() {
 
           {/* RECHERCHE */}
           <TextInput
-            placeholder="Rechercher par nom, prénom, fonction ou titre..."
+            placeholder="Rechercher par nom, prénom, grade, fonction ou titre..."
             leftSection={<IconSearch size={16} />}
             value={searchTerm}
             onChange={(e) => {
@@ -321,6 +332,12 @@ export default function SignatairesManager() {
                       </Table.Th>
                       <Table.Th
                         style={{ cursor: 'pointer' }}
+                        onClick={() => handleSort('grade')}
+                      >
+                        Grade
+                      </Table.Th>
+                      <Table.Th
+                        style={{ cursor: 'pointer' }}
                         onClick={() => handleSort('fonction')}
                       >
                         Fonction
@@ -359,6 +376,17 @@ export default function SignatairesManager() {
                             <Text size="sm">
                               {item.prenom}
                             </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            {item.grade ? (
+                              <Badge color="yellow" variant="light" size="sm">
+                                {item.grade}
+                              </Badge>
+                            ) : (
+                              <Badge color="gray" variant="light" size="sm">
+                                -
+                              </Badge>
+                            )}
                           </Table.Td>
                           <Table.Td>
                             <Badge color="cyan" variant="light" size="sm">
@@ -460,6 +488,14 @@ export default function SignatairesManager() {
           />
 
           <TextInput
+            label="Grade"
+            placeholder="Ex: Commissaire Divisionnaire de Police"
+            value={formData.grade}
+            onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
+            description="Grade du signataire (optionnel)"
+          />
+
+          <TextInput
             label="Fonction"
             placeholder="Ex: Directeur Général"
             value={formData.fonction}
@@ -474,7 +510,7 @@ export default function SignatairesManager() {
             value={formData.titre}
             onChange={(e) => setFormData({ ...formData, titre: e.target.value })}
             withAsterisk
-            description="Titre ou grade du signataire"
+            description="Titre civil ou académique"
           />
 
           <Switch
@@ -537,8 +573,9 @@ export default function SignatairesManager() {
           <Text size="sm">1. Les signataires sont les personnes habilitées à signer les documents officiels</Text>
           <Text size="sm">2. L'ordre de signature détermine l'ordre de priorité (1 = premier signataire)</Text>
           <Text size="sm">3. Renseignez la fonction et le titre pour l'identification officielle</Text>
-          <Text size="sm">4. Seuls les signataires actifs apparaîtront dans les listes de signature</Text>
-          <Text size="sm">5. Utilisez la recherche pour trouver rapidement un signataire</Text>
+          <Text size="sm">4. Le grade est optionnel mais recommandé pour les officiers supérieurs</Text>
+          <Text size="sm">5. Seuls les signataires actifs apparaîtront dans les listes de signature</Text>
+          <Text size="sm">6. Utilisez la recherche pour trouver rapidement un signataire</Text>
         </Stack>
       </Card>
     </Stack>
