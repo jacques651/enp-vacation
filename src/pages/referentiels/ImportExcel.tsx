@@ -30,64 +30,133 @@ interface ImportResult {
   errors: string[];
 }
 
-const ENTITY_CONFIG: Record<EntityType, { label: string; columns: string[]; requiredColumns: string[] }> = {
+// Type pour les lignes du fichier Excel
+type ExcelRow = Record<string, any>;
+
+const ENTITY_CONFIG: Record<EntityType, { label: string; columns: string[]; requiredColumns: string[]; backendFunction: string }> = {
   cycles: {
     label: 'Cycles',
     columns: ['designation', 'nb_classe'],
     requiredColumns: ['designation'],
+    backendFunction: 'import_cycles',
   },
   modules: {
     label: 'Modules',
-    columns: ['designation', 'cycle', 'cycle_id'],
-    requiredColumns: ['designation'],
+    columns: ['designation', 'cycle_id', 'cycle'],
+    requiredColumns: ['designation'], // cycle_id ou cycle est accepté
+    backendFunction: 'import_modules',
   },
   matieres: {
     label: 'Matières',
-    columns: ['designation', 'module', 'module_id', 'vhoraire', 'coefficient', 'observation'],
-    requiredColumns: ['designation', 'vhoraire'],
+    columns: ['designation', 'module_id', 'module', 'vhoraire', 'coefficient', 'observation'],
+    requiredColumns: ['designation', 'vhoraire'], // module_id ou module est accepté
+    backendFunction: 'import_matieres',
   },
   enseignants: {
     label: 'Enseignants',
-    columns: ['nom', 'prenom', 'telephone', 'titre', 'statut', 'banque', 'numero_compte', 'cle_rib'],
+    columns: ['nom', 'prenom', 'telephone', 'titre', 'statut'],
     requiredColumns: ['nom', 'prenom'],
+    backendFunction: 'import_enseignants',
   },
   banques: {
     label: 'Banques',
     columns: ['designation'],
     requiredColumns: ['designation'],
+    backendFunction: 'import_banques',
   },
   promotions: {
     label: 'Promotions',
     columns: ['libelle'],
     requiredColumns: ['libelle'],
+    backendFunction: 'import_promotions',
   },
   plafonds: {
     label: 'Plafonds',
     columns: ['titre', 'statut', 'volume_horaire_max'],
     requiredColumns: ['titre', 'statut', 'volume_horaire_max'],
+    backendFunction: 'import_plafonds',
   },
   annees_scolaires: {
     label: 'Années Scolaires',
     columns: ['libelle'],
     requiredColumns: ['libelle'],
+    backendFunction: 'import_annees_scolaires',
   },
   comptes_bancaires: {
     label: 'Comptes Bancaires',
     columns: ['enseignant_nom', 'enseignant_prenom', 'banque_designation', 'numero_compte'],
     requiredColumns: ['enseignant_nom', 'enseignant_prenom', 'banque_designation', 'numero_compte'],
+    backendFunction: 'import_comptes_bancaires',
   },
 };
 
 const STATUTS = ['interne', 'externe'];
-const TITRES = ['directeur', 'chef de division/service', 'agent', 'retraité', 'autre'];
+const TITRES = ['directeur', 'chef de service', 'chef de division/service', 'agent', 'retraité', 'autre'];
 
 export default function ImportExcel() {
   const [activeTab, setActiveTab] = useState<EntityType>('cycles');
   const [file, setFile] = useState<File | null>(null);
-  const [previewData, setPreviewData] = useState<any[]>([]);
+  const [previewData, setPreviewData] = useState<ExcelRow[]>([]);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
+  const [showMapping, setShowMapping] = useState(false);
+  const [rawColumns, setRawColumns] = useState<string[]>([]);
+
+  // Valider les colonnes requises
+  const validateColumns = (data: ExcelRow[], entityType: EntityType): { missing: string[]; available: string[] } => {
+    if (data.length === 0) return { missing: [], available: [] };
+    
+    const config = ENTITY_CONFIG[entityType];
+    const availableColumns = Object.keys(data[0]).map(k => k.toLowerCase());
+    
+    // Pour modules et matieres, les colonnes requises sont flexibles
+    if (entityType === 'modules') {
+      const hasCycleId = availableColumns.includes('cycle_id');
+      const hasCycle = availableColumns.includes('cycle') || availableColumns.includes('cycle_designation');
+      const missing = [];
+      if (!hasCycleId && !hasCycle) {
+        missing.push('cycle_id ou cycle');
+      }
+      return { missing, available: availableColumns };
+    }
+    
+    if (entityType === 'matieres') {
+      const hasModuleId = availableColumns.includes('module_id');
+      const hasModule = availableColumns.includes('module') || availableColumns.includes('module_designation');
+      const missing = [];
+      if (!hasModuleId && !hasModule) {
+        missing.push('module_id ou module');
+      }
+      return { missing, available: availableColumns };
+    }
+    
+    const missingColumns = config.requiredColumns.filter(
+      col => !availableColumns.includes(col.toLowerCase())
+    );
+    
+    return { missing: missingColumns, available: availableColumns };
+  };
+
+  // Détecter automatiquement le mapping des colonnes
+  const autoDetectMapping = (availableColumns: string[], entityType: EntityType): Record<string, string> => {
+    const config = ENTITY_CONFIG[entityType];
+    const mapping: Record<string, string> = {};
+    
+    for (const requiredCol of config.requiredColumns) {
+      const match = availableColumns.find(col => 
+        col === requiredCol ||
+        col.includes(requiredCol) ||
+        requiredCol.includes(col)
+      );
+      if (match) {
+        mapping[requiredCol] = match;
+      }
+    }
+    
+    return mapping;
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -96,6 +165,7 @@ export default function ImportExcel() {
     setFile(selectedFile);
     setImportResult(null);
     setError(null);
+    setShowMapping(false);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -103,14 +173,28 @@ export default function ImportExcel() {
         const data = new Uint8Array(event.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet) as ExcelRow[];
         
-        // Limiter l'aperçu à 10 lignes
         setPreviewData(jsonData.slice(0, 10));
         
         if (jsonData.length === 0) {
           setError('Le fichier Excel est vide');
+          return;
         }
+
+        const availableColumns = Object.keys(jsonData[0]);
+        setRawColumns(availableColumns);
+        
+        const { missing, available } = validateColumns(jsonData, activeTab);
+        
+        if (missing.length > 0) {
+          const autoMapping = autoDetectMapping(available, activeTab);
+          setColumnMapping(autoMapping);
+          setShowMapping(true);
+        } else {
+          setShowMapping(false);
+        }
+        
       } catch (err) {
         setError('Erreur lors de la lecture du fichier Excel');
         console.error(err);
@@ -121,41 +205,71 @@ export default function ImportExcel() {
 
   const downloadTemplate = () => {
     const config = ENTITY_CONFIG[activeTab];
-    const templateData = [config.columns.reduce((acc, col) => ({ ...acc, [col]: '' }), {})];
+    let templateData: ExcelRow[] = [];
     
-    // Ajouter des exemples pour chaque entité
-    if (activeTab === 'cycles') {
-      templateData[0] = { designation: 'Licence 1', nb_classe: 2 };
-    } else if (activeTab === 'modules') {
-      templateData[0] = { designation: 'Mathématiques', cycle: 'Licence 1' };
-    } else if (activeTab === 'matieres') {
-      templateData[0] = { designation: 'Algèbre', module: 'Mathématiques', vhoraire: 2.5, coefficient: 1, observation: '' };
-    } else if (activeTab === 'enseignants') {
-      templateData[0] = { 
-        nom: 'DIOP', 
-        prenom: 'Amadou', 
-        telephone: '76123456', 
-        titre: 'agent', 
-        statut: 'interne', 
-        banque: 'Banque Malienne de Solidarité', 
-        numero_compte: '000123456789', 
-        cle_rib: '12' 
-      };
-    } else if (activeTab === 'banques') {
-      templateData[0] = { designation: 'Banque Nationale de Développement' };
-    } else if (activeTab === 'promotions') {
-      templateData[0] = { libelle: '55ème promotion' };
-    } else if (activeTab === 'plafonds') {
-      templateData[0] = { titre: 'agent', statut: 'interne', volume_horaire_max: 100 };
-    } else if (activeTab === 'annees_scolaires') {
-      templateData[0] = { libelle: '2025-2026' };
-    } else if (activeTab === 'comptes_bancaires') {
-      templateData[0] = { 
-        enseignant_nom: 'DIOP', 
-        enseignant_prenom: 'Amadou', 
-        banque_designation: 'Banque Nationale de Développement', 
-        numero_compte: '000123456789'
-      };
+    switch (activeTab) {
+      case 'cycles':
+        templateData = [
+          { designation: 'EL Sous-officiers PN', nb_classe: 25 },
+          { designation: 'EL Agents PM', nb_classe: 1 },
+          { designation: 'EL Assistants PM', nb_classe: 1 },
+          { designation: 'EL Contrôleurs PM', nb_classe: 1 },
+          { designation: 'EL Inspecteurs PM', nb_classe: 1 },
+        ];
+        break;
+      case 'modules':
+        templateData = [
+          { designation: 'module1', cycle_id: 1 },
+          { designation: 'module2', cycle_id: 1 },
+          { designation: 'module3', cycle_id: 1 },
+          { designation: 'module4', cycle_id: 2 },
+          { designation: 'module5', cycle_id: 2 },
+        ];
+        break;
+      case 'matieres':
+        templateData = [
+          { designation: 'Ecole du Soldat', module_id: 1, vhoraire: 225, coefficient: 3, observation: 'Spécifique' },
+          { designation: 'Topographie', module_id: 1, vhoraire: 20, coefficient: 1, observation: '' },
+          { designation: 'Ethique', module_id: 2, vhoraire: 30, coefficient: 1.5, observation: 'Spécifique' },
+        ];
+        break;
+      case 'enseignants':
+        templateData = [
+          { nom: 'KORGO', prenom: 'Jacques', telephone: '75118161', titre: 'agent', statut: 'externe' },
+          { nom: 'DJAFOU', prenom: 'Boureima', telephone: '75301138', titre: 'chef de service', statut: 'interne' },
+        ];
+        break;
+      case 'banques':
+        templateData = [
+          { designation: 'ORABANK' },
+          { designation: 'CORIS BANK INTERNATIONALE' },
+        ];
+        break;
+      case 'promotions':
+        templateData = [
+          { libelle: '55ème promotion' },
+          { libelle: '56ème promotion' },
+        ];
+        break;
+      case 'plafonds':
+        templateData = [
+          { titre: 'agent', statut: 'interne', volume_horaire_max: 100 },
+          { titre: 'directeur', statut: 'interne', volume_horaire_max: 140 },
+        ];
+        break;
+      case 'annees_scolaires':
+        templateData = [
+          { libelle: '2025-2026' },
+          { libelle: '2026-2027' },
+        ];
+        break;
+      case 'comptes_bancaires':
+        templateData = [
+          { enseignant_nom: 'KORGO', enseignant_prenom: 'Jacques', banque_designation: 'ORABANK', numero_compte: '612095100001' },
+        ];
+        break;
+      default:
+        templateData = [config.columns.reduce((acc, col) => ({ ...acc, [col]: '' }), {})];
     }
     
     const ws = XLSX.utils.json_to_sheet(templateData);
@@ -180,68 +294,68 @@ export default function ImportExcel() {
           const data = new Uint8Array(event.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: 'array' });
           const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-          const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+          const jsonData = XLSX.utils.sheet_to_json(firstSheet) as ExcelRow[];
 
           if (jsonData.length === 0) {
             setError('Le fichier Excel est vide');
             setImporting(false);
             return;
           }
+          
+          let cleanedData: ExcelRow[] = jsonData;
+          
+          if (showMapping && Object.keys(columnMapping).length > 0) {
+            cleanedData = jsonData.map((row: ExcelRow) => {
+              const mapped: ExcelRow = {};
+              for (const [target, source] of Object.entries(columnMapping)) {
+                if (row[source]) {
+                  mapped[target] = row[source];
+                }
+              }
+              for (const [key, value] of Object.entries(row)) {
+                if (!Object.values(columnMapping).includes(key)) {
+                  mapped[key] = value;
+                }
+              }
+              return mapped;
+            });
+          }
 
-          // Nettoyer les données
-          const cleanedData = jsonData.map((row: any) => {
-            const cleaned: any = {};
+          const normalizedData = cleanedData.map((row: ExcelRow) => {
+            const normalized: ExcelRow = {};
             for (const key of Object.keys(row)) {
               const normalizedKey = key.toLowerCase().trim();
-              cleaned[normalizedKey] = row[key];
+              normalized[normalizedKey] = row[key];
             }
-            return cleaned;
+            return normalized;
           });
 
+          const config = ENTITY_CONFIG[activeTab];
           let result: ImportResult;
           
-          switch (activeTab) {
-            case 'cycles':
-              result = await invoke('import_cycles', { data: cleanedData });
-              break;
-            case 'modules':
-              result = await invoke('import_modules', { data: cleanedData });
-              break;
-            case 'matieres':
-              result = await invoke('import_matieres', { data: cleanedData });
-              break;
-            case 'enseignants':
-              result = await invoke('import_enseignants', { data: cleanedData });
-              break;
-            case 'banques':
-              result = await invoke('import_banques', { data: cleanedData });
-              break;
-            case 'promotions':
-              result = await invoke('import_promotions', { data: cleanedData });
-              break;
-            case 'plafonds':
-              result = await invoke('import_plafonds', { data: cleanedData });
-              break;
-            case 'annees_scolaires':
-              result = await invoke('import_annees_scolaires', { data: cleanedData });
-              break;
-            case 'comptes_bancaires':
-              result = await invoke('import_comptes_bancaires', { data: cleanedData });
-              break;
-            default:
-              throw new Error('Type non supporté');
-          }
+          console.log(`📊 Import de ${normalizedData.length} lignes pour ${config.label}`);
+          console.log("Première ligne:", normalizedData[0]);
           
+          result = await invoke(config.backendFunction, { data: normalizedData });
+          
+          console.log("Résultat import:", result);
           setImportResult(result);
-        } catch (err) {
-          setError(`Erreur lors de l'import: ${err}`);
+          
+          if (result.errors.length === 0) {
+            setTimeout(() => {
+              resetImport();
+            }, 3000);
+          }
+        } catch (err: any) {
+          console.error("Erreur détaillée:", err);
+          setError(`Erreur lors de l'import: ${err.message || err}`);
         } finally {
           setImporting(false);
         }
       };
       reader.readAsArrayBuffer(file);
-    } catch (err) {
-      setError(`Erreur: ${err}`);
+    } catch (err: any) {
+      setError(`Erreur: ${err.message || err}`);
       setImporting(false);
     }
   };
@@ -251,6 +365,13 @@ export default function ImportExcel() {
     setPreviewData([]);
     setImportResult(null);
     setError(null);
+    setShowMapping(false);
+    setColumnMapping({});
+    setRawColumns([]);
+  };
+
+  const updateColumnMapping = (target: string, source: string) => {
+    setColumnMapping(prev => ({ ...prev, [target]: source }));
   };
 
   const config = ENTITY_CONFIG[activeTab];
@@ -271,7 +392,10 @@ export default function ImportExcel() {
         </Group>
       </Card>
 
-      <Tabs value={activeTab} onChange={(value) => setActiveTab(value as EntityType)}>
+      <Tabs value={activeTab} onChange={(value) => {
+        setActiveTab(value as EntityType);
+        resetImport();
+      }}>
         <Tabs.List grow>
           <Tabs.Tab value="cycles">Cycles</Tabs.Tab>
           <Tabs.Tab value="modules">Modules</Tabs.Tab>
@@ -291,7 +415,7 @@ export default function ImportExcel() {
             <div>
               <Title order={4}>Importer des {config.label}</Title>
               <Text size="sm" c="dimmed">
-                Format attendu: {config.columns.join(', ')}
+                Colonnes requises: {config.requiredColumns.join(', ')}
               </Text>
             </div>
             <Button
@@ -331,6 +455,48 @@ export default function ImportExcel() {
               style={{ display: 'none' }}
             />
           </div>
+
+          {rawColumns.length > 0 && (
+            <Alert color="blue" variant="light" title="Colonnes détectées dans le fichier">
+              <Group gap="xs">
+                {rawColumns.map((col) => (
+                  <Badge key={col} color={config.requiredColumns.includes(col) ? "green" : "gray"} variant="light">
+                    {col}
+                  </Badge>
+                ))}
+              </Group>
+            </Alert>
+          )}
+
+          {showMapping && (
+            <Paper withBorder p="md" radius="md" bg="yellow.0">
+              <Stack gap="md">
+                <Group>
+                  <IconAlertCircle size={20} color="#fab005" />
+                  <Text fw={600}>Mapping des colonnes requis</Text>
+                </Group>
+                <Text size="sm">
+                  Certaines colonnes obligatoires n'ont pas été trouvées. Veuillez les mapper :
+                </Text>
+                {config.requiredColumns.map((requiredCol) => (
+                  <Select
+                    key={requiredCol}
+                    label={`Colonne pour "${requiredCol}"`}
+                    placeholder="Sélectionner une colonne"
+                    value={columnMapping[requiredCol] || ''}
+                    onChange={(value) => updateColumnMapping(requiredCol, value || '')}
+                    data={rawColumns.map(col => ({ value: col, label: col }))}
+                    required
+                  />
+                ))}
+                <Group justify="flex-end">
+                  <Button variant="light" onClick={() => setShowMapping(false)} size="sm">
+                    Ignorer
+                  </Button>
+                </Group>
+              </Stack>
+            </Paper>
+          )}
 
           {previewData.length > 0 && (
             <Paper withBorder p="md" radius="md">
@@ -396,7 +562,7 @@ export default function ImportExcel() {
             </Alert>
           )}
 
-          {file && (
+          {file && !importResult && (
             <Group justify="flex-end" mt="md">
               <Button variant="light" onClick={resetImport}>
                 Annuler
@@ -429,10 +595,10 @@ export default function ImportExcel() {
         
         <Title order={5} mb="md">📝 Notes importantes</Title>
         <Stack gap="xs">
-          <Text size="sm">• Pour les modules, la colonne "cycle" doit correspondre à la désignation d'un cycle existant</Text>
-          <Text size="sm">• Pour les matières, la colonne "module" doit correspondre à la désignation d'un module existant</Text>
+          <Text size="sm">• Pour les modules, utilisez "cycle_id" (l'ID du cycle) ou "cycle" (le nom du cycle)</Text>
+          <Text size="sm">• Pour les matières, utilisez "module_id" (l'ID du module) ou "module" (le nom du module)</Text>
           <Text size="sm">• Pour les enseignants, le statut doit être "interne" ou "externe"</Text>
-          <Text size="sm">• Pour les enseignants, le titre doit être parmi: directeur, chef de division/service, agent, retraité, autre</Text>
+          <Text size="sm">• Pour les enseignants, le titre doit être parmi: directeur, chef de service, chef de division/service, agent, retraité, autre</Text>
           <Text size="sm">• Pour les années scolaires, le format doit être YYYY-YYYY (ex: 2025-2026)</Text>
           <Text size="sm">• Pour les comptes bancaires, l'enseignant et la banque doivent déjà exister dans la base</Text>
           <Text size="sm">• Les lignes en erreur sont ignorées, les lignes valides sont importées</Text>

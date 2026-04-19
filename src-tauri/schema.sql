@@ -279,13 +279,6 @@ INSERT OR IGNORE INTO entete (cle, valeur) VALUES
     ('adresse', '01 BP 1234 OUAGADOUGOU 01'),
     ('telephone', '25 36 11 11'),
     ('email', 'enp@police.bf'),
-    ('directeur_nom', ''),
-    ('directeur_titre', ''),
-    ('directeur_fonction', ''),
-    ('comptable_nom', ''),
-    ('comptable_titre', ''),
-    ('comptable_fonction', ''),
-    ('signataire_defaut', '');
 
 -- =====================================================
 -- FIN

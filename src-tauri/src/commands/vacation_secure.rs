@@ -65,7 +65,7 @@ pub struct VacationResponse {
 // =========================
 // STRUCT INTERNE
 // =========================
-
+#[allow(dead_code)]
 #[derive(FromRow)]
 struct MatiereCycle {
     vhoraire: f64,

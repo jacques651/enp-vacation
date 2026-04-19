@@ -50,6 +50,20 @@ pub async fn import_cycles(
             continue;
         }
         
+        // Vérifier si le cycle existe déjà
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM cycles WHERE designation = ?)"
+        )
+        .bind(&designation)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        
+        if exists > 0 {
+            errors.push(format!("Ligne {}: cycle '{}' existe déjà", line_num, designation));
+            continue;
+        }
+        
         let result = sqlx::query(
             "INSERT INTO cycles (designation, nb_classe) VALUES (?, ?)"
         )
@@ -83,7 +97,11 @@ pub async fn import_modules(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         
-        let cycle_designation = row.get("cycle")
+        // Accepter cycle_id (numérique) ou cycle (texte)
+        let cycle_id = row.get("cycle_id")
+            .and_then(|v| v.as_u64());
+        
+        let cycle_name = row.get("cycle")
             .or_else(|| row.get("cycle_designation"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
@@ -93,35 +111,68 @@ pub async fn import_modules(
             continue;
         };
         
-        let Some(cycle_desig) = cycle_designation else {
-            errors.push(format!("Ligne {}: cycle manquant", line_num));
-            continue;
-        };
-        
         if designation.trim().is_empty() {
             errors.push(format!("Ligne {}: designation vide", line_num));
             continue;
         }
         
         // Trouver l'ID du cycle
-        let cycle_id = sqlx::query_scalar::<_, i32>(
-            "SELECT id FROM cycles WHERE designation = ?"
+        let actual_cycle_id = if let Some(id) = cycle_id {
+            // Vérifier que le cycle existe
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM cycles WHERE id = ?)"
+            )
+            .bind(id as i32)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            
+            if exists == 0 {
+                errors.push(format!("Ligne {}: cycle_id {} n'existe pas", line_num, id));
+                continue;
+            }
+            id as i32
+        } else if let Some(name) = cycle_name {
+            let result = sqlx::query_scalar::<_, i32>(
+                "SELECT id FROM cycles WHERE designation = ?"
+            )
+            .bind(&name)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            
+            match result {
+                Some(id) => id,
+                None => {
+                    errors.push(format!("Ligne {}: cycle '{}' non trouvé", line_num, name));
+                    continue;
+                }
+            }
+        } else {
+            errors.push(format!("Ligne {}: cycle_id ou cycle manquant", line_num));
+            continue;
+        };
+        
+        // Vérifier si le module existe déjà
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM modules WHERE designation = ? AND cycle_id = ?)"
         )
-        .bind(&cycle_desig)
-        .fetch_optional(&state.pool)
+        .bind(&designation)
+        .bind(actual_cycle_id)
+        .fetch_one(&state.pool)
         .await
         .map_err(|e| e.to_string())?;
         
-        let Some(cycle_id) = cycle_id else {
-            errors.push(format!("Ligne {}: cycle '{}' non trouvé", line_num, cycle_desig));
+        if exists > 0 {
+            errors.push(format!("Ligne {}: module '{}' existe déjà pour ce cycle", line_num, designation));
             continue;
-        };
+        }
         
         let result = sqlx::query(
             "INSERT INTO modules (designation, cycle_id) VALUES (?, ?)"
         )
         .bind(&designation)
-        .bind(cycle_id)
+        .bind(actual_cycle_id)
         .execute(&state.pool)
         .await;
         
@@ -146,7 +197,6 @@ pub async fn import_matieres(
     for (idx, row) in data.iter().enumerate() {
         let line_num = idx + 1;
         
-        // Récupérer les valeurs
         let designation = row.get("designation")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
@@ -155,15 +205,25 @@ pub async fn import_matieres(
             .and_then(|v| v.as_f64())
             .or_else(|| row.get("vhoraire").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()));
         
-        let module_designation = row.get("module")
+        // Accepter module_id (numérique) ou module (texte)
+        let module_id = row.get("module_id")
+            .and_then(|v| v.as_u64());
+        
+        let module_name = row.get("module")
             .or_else(|| row.get("module_designation"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         
-        let module_id = row.get("module_id")
-            .and_then(|v| v.as_u64());
+        let coefficient = row.get("coefficient")
+            .and_then(|v| v.as_f64())
+            .or_else(|| row.get("coefficient").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()))
+            .unwrap_or(1.0);
         
-        // Validation
+        let observation = row.get("observation")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        
         let Some(designation) = designation else {
             errors.push(format!("Ligne {}: designation manquante", line_num));
             continue;
@@ -186,12 +246,25 @@ pub async fn import_matieres(
         
         // Trouver l'ID du module
         let actual_module_id = if let Some(id) = module_id {
+            // Vérifier que le module existe
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM modules WHERE id = ?)"
+            )
+            .bind(id as i32)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            
+            if exists == 0 {
+                errors.push(format!("Ligne {}: module_id {} n'existe pas", line_num, id));
+                continue;
+            }
             id as i32
-        } else if let Some(module_desig) = module_designation {
+        } else if let Some(name) = module_name {
             let result = sqlx::query_scalar::<_, i32>(
                 "SELECT id FROM modules WHERE designation = ?"
             )
-            .bind(&module_desig)
+            .bind(&name)
             .fetch_optional(&state.pool)
             .await
             .map_err(|e| e.to_string())?;
@@ -199,16 +272,30 @@ pub async fn import_matieres(
             match result {
                 Some(id) => id,
                 None => {
-                    errors.push(format!("Ligne {}: module '{}' non trouvé", line_num, module_desig));
+                    errors.push(format!("Ligne {}: module '{}' non trouvé", line_num, name));
                     continue;
                 }
             }
         } else {
-            errors.push(format!("Ligne {}: module ou module_id manquant", line_num));
+            errors.push(format!("Ligne {}: module_id ou module manquant", line_num));
             continue;
         };
         
-        // Insérer
+        // Vérifier si la matière existe déjà
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM matieres WHERE designation = ? AND module_id = ?)"
+        )
+        .bind(&designation)
+        .bind(actual_module_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        
+        if exists > 0 {
+            errors.push(format!("Ligne {}: matière '{}' existe déjà pour ce module", line_num, designation));
+            continue;
+        }
+        
         let result = sqlx::query(
             "INSERT INTO matieres (designation, vhoraire, module_id) VALUES (?, ?, ?)"
         )
@@ -220,13 +307,7 @@ pub async fn import_matieres(
         
         match result {
             Ok(_) => success += 1,
-            Err(e) => {
-                if e.to_string().contains("UNIQUE") {
-                    errors.push(format!("Ligne {}: matière '{}' existe déjà dans ce module", line_num, designation));
-                } else {
-                    errors.push(format!("Ligne {}: {}", line_num, e));
-                }
-            }
+            Err(e) => errors.push(format!("Ligne {}: {}", line_num, e)),
         }
     }
     
@@ -288,6 +369,16 @@ pub async fn import_enseignants(
             continue;
         };
         
+        if nom.trim().is_empty() {
+            errors.push(format!("Ligne {}: nom vide", line_num));
+            continue;
+        }
+        
+        if prenom.trim().is_empty() {
+            errors.push(format!("Ligne {}: prenom vide", line_num));
+            continue;
+        }
+        
         if !valid_titres.contains(&titre.as_str()) {
             errors.push(format!("Ligne {}: titre '{}' invalide (doit être: {:?})", line_num, titre, valid_titres));
             continue;
@@ -295,6 +386,21 @@ pub async fn import_enseignants(
         
         if !valid_statuts.contains(&statut.as_str()) {
             errors.push(format!("Ligne {}: statut '{}' invalide (doit être: {:?})", line_num, statut, valid_statuts));
+            continue;
+        }
+        
+        // Vérifier si l'enseignant existe déjà
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM enseignants WHERE nom = ? AND prenom = ?)"
+        )
+        .bind(&nom)
+        .bind(&prenom)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        
+        if exists > 0 {
+            errors.push(format!("Ligne {}: enseignant '{} {}' existe déjà", line_num, nom, prenom));
             continue;
         }
         
@@ -344,6 +450,20 @@ pub async fn import_banques(
             continue;
         }
         
+        // Vérifier si la banque existe déjà
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM banques WHERE designation = ?)"
+        )
+        .bind(&designation)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        
+        if exists > 0 {
+            errors.push(format!("Ligne {}: banque '{}' existe déjà", line_num, designation));
+            continue;
+        }
+        
         let result = sqlx::query(
             "INSERT INTO banques (designation) VALUES (?)"
         )
@@ -353,13 +473,7 @@ pub async fn import_banques(
         
         match result {
             Ok(_) => success += 1,
-            Err(e) => {
-                if e.to_string().contains("UNIQUE") {
-                    errors.push(format!("Ligne {}: banque '{}' existe déjà", line_num, designation));
-                } else {
-                    errors.push(format!("Ligne {}: {}", line_num, e));
-                }
-            }
+            Err(e) => errors.push(format!("Ligne {}: {}", line_num, e)),
         }
     }
     
@@ -392,6 +506,20 @@ pub async fn import_promotions(
             continue;
         }
         
+        // Vérifier si la promotion existe déjà
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM promotions WHERE libelle = ?)"
+        )
+        .bind(&libelle)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        
+        if exists > 0 {
+            errors.push(format!("Ligne {}: promotion '{}' existe déjà", line_num, libelle));
+            continue;
+        }
+        
         let result = sqlx::query(
             "INSERT INTO promotions (libelle) VALUES (?)"
         )
@@ -401,13 +529,7 @@ pub async fn import_promotions(
         
         match result {
             Ok(_) => success += 1,
-            Err(e) => {
-                if e.to_string().contains("UNIQUE") {
-                    errors.push(format!("Ligne {}: promotion '{}' existe déjà", line_num, libelle));
-                } else {
-                    errors.push(format!("Ligne {}: {}", line_num, e));
-                }
-            }
+            Err(e) => errors.push(format!("Ligne {}: {}", line_num, e)),
         }
     }
     
@@ -455,18 +577,43 @@ pub async fn import_plafonds(
             continue;
         };
         
+        if titre.trim().is_empty() {
+            errors.push(format!("Ligne {}: titre vide", line_num));
+            continue;
+        }
+        
+        if statut.trim().is_empty() {
+            errors.push(format!("Ligne {}: statut vide", line_num));
+            continue;
+        }
+        
         if !valid_titres.contains(&titre.as_str()) {
-            errors.push(format!("Ligne {}: titre '{}' invalide", line_num, titre));
+            errors.push(format!("Ligne {}: titre '{}' invalide (doit être: {:?})", line_num, titre, valid_titres));
             continue;
         }
         
         if !valid_statuts.contains(&statut.as_str()) {
-            errors.push(format!("Ligne {}: statut '{}' invalide", line_num, statut));
+            errors.push(format!("Ligne {}: statut '{}' invalide (doit être: {:?})", line_num, statut, valid_statuts));
             continue;
         }
         
         if volume_horaire_max == 0 {
             errors.push(format!("Ligne {}: volume_horaire_max doit être > 0", line_num));
+            continue;
+        }
+        
+        // Vérifier si le plafond existe déjà
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM plafonds WHERE titre = ? AND statut = ?)"
+        )
+        .bind(&titre)
+        .bind(&statut)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        
+        if exists > 0 {
+            errors.push(format!("Ligne {}: plafond '{}' pour statut '{}' existe déjà", line_num, titre, statut));
             continue;
         }
         
@@ -481,13 +628,7 @@ pub async fn import_plafonds(
         
         match result {
             Ok(_) => success += 1,
-            Err(e) => {
-                if e.to_string().contains("UNIQUE") {
-                    errors.push(format!("Ligne {}: plafond '{}' pour statut '{}' existe déjà", line_num, titre, statut));
-                } else {
-                    errors.push(format!("Ligne {}: {}", line_num, e));
-                }
-            }
+            Err(e) => errors.push(format!("Ligne {}: {}", line_num, e)),
         }
     }
     
@@ -520,6 +661,20 @@ pub async fn import_annees_scolaires(
             continue;
         }
         
+        // Vérifier si l'année scolaire existe déjà
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM annees_scolaires WHERE libelle = ?)"
+        )
+        .bind(&libelle)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        
+        if exists > 0 {
+            errors.push(format!("Ligne {}: année scolaire '{}' existe déjà", line_num, libelle));
+            continue;
+        }
+        
         let result = sqlx::query(
             "INSERT INTO annees_scolaires (libelle) VALUES (?)"
         )
@@ -529,13 +684,7 @@ pub async fn import_annees_scolaires(
         
         match result {
             Ok(_) => success += 1,
-            Err(e) => {
-                if e.to_string().contains("UNIQUE") {
-                    errors.push(format!("Ligne {}: année scolaire '{}' existe déjà", line_num, libelle));
-                } else {
-                    errors.push(format!("Ligne {}: {}", line_num, e));
-                }
-            }
+            Err(e) => errors.push(format!("Ligne {}: {}", line_num, e)),
         }
     }
     
@@ -590,6 +739,26 @@ pub async fn import_comptes_bancaires(
             continue;
         };
         
+        if enseignant_nom.trim().is_empty() {
+            errors.push(format!("Ligne {}: enseignant_nom vide", line_num));
+            continue;
+        }
+        
+        if enseignant_prenom.trim().is_empty() {
+            errors.push(format!("Ligne {}: enseignant_prenom vide", line_num));
+            continue;
+        }
+        
+        if banque_designation.trim().is_empty() {
+            errors.push(format!("Ligne {}: banque_designation vide", line_num));
+            continue;
+        }
+        
+        if numero_compte.trim().is_empty() {
+            errors.push(format!("Ligne {}: numero_compte vide", line_num));
+            continue;
+        }
+        
         // Trouver l'enseignant
         let enseignant_id = sqlx::query_scalar::<_, i32>(
             "SELECT id FROM enseignants WHERE nom = ? AND prenom = ?"
@@ -618,6 +787,22 @@ pub async fn import_comptes_bancaires(
             errors.push(format!("Ligne {}: banque '{}' non trouvée", line_num, banque_designation));
             continue;
         };
+        
+        // Vérifier si le compte existe déjà
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM comptes_bancaires WHERE enseignant_id = ? AND banque_id = ? AND numero_compte = ?)"
+        )
+        .bind(enseignant_id)
+        .bind(banque_id)
+        .bind(&numero_compte)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        
+        if exists > 0 {
+            errors.push(format!("Ligne {}: compte bancaire pour '{} {}' existe déjà", line_num, enseignant_nom, enseignant_prenom));
+            continue;
+        }
         
         let result = sqlx::query(
             "INSERT INTO comptes_bancaires (enseignant_id, banque_id, numero_compte, actif) VALUES (?, ?, ?, 1)"

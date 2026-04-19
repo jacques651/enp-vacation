@@ -204,7 +204,10 @@ export default function VacationsManager() {
     promotion_id: 0,
   });
 
-  // Récupérer les données référentielles
+  // ============================================================
+  // RÉCUPÉRATION DES DONNÉES RÉFÉRENTIELLES
+  // ============================================================
+
   const { data: enseignants = [] } = useQuery<Enseignant[]>({
     queryKey: ['enseignants'],
     queryFn: () => invoke('get_enseignants'),
@@ -235,31 +238,33 @@ export default function VacationsManager() {
     queryFn: () => invoke('get_annees_scolaires'),
   });
 
-  // Récupérer toutes les vacations
+  // ============================================================
+  // RÉCUPÉRATION DES VACATIONS
+  // ============================================================
+
   const { data: vacations = [], isLoading, error } = useQuery<VacationResponse[]>({
-  queryKey: ['vacations'],
-  queryFn: async () => {
-    try {
-      console.log("TEST INVOKE...");
-
-      const result = await invoke('get_vacations');
-
-      console.log("VACATIONS OK:", result);
-
-      if (!Array.isArray(result)) {
-        console.warn("RESULT N'EST PAS UN TABLEAU:", result);
-        return [];
+    queryKey: ['vacations'],
+    queryFn: async () => {
+      try {
+        console.log("TEST INVOKE...");
+        const result = await invoke('get_vacations');
+        console.log("VACATIONS OK:", result);
+        if (!Array.isArray(result)) {
+          console.warn("RESULT N'EST PAS UN TABLEAU:", result);
+          return [];
+        }
+        return result;
+      } catch (e) {
+        console.error("ERREUR BACKEND:", e);
+        throw e;
       }
+    },
+  });
 
-      return result;
-    } catch (e) {
-      console.error("ERREUR BACKEND:", e);
-      throw e;
-    }
-  },
-});
+  // ============================================================
+  // FILTRAGE ET PAGINATION
+  // ============================================================
 
-  // Filtrer les vacations
   const filteredVacations = useMemo(() => {
     if (!searchTerm) return vacations;
     const search = searchTerm.toLowerCase();
@@ -270,7 +275,6 @@ export default function VacationsManager() {
     );
   }, [vacations, searchTerm]);
 
-  // Pagination
   const totalItems = filteredVacations.length;
   const totalPages = Math.ceil(totalItems / parseInt(itemsPerPage));
   const paginatedVacations = filteredVacations.slice(
@@ -278,7 +282,10 @@ export default function VacationsManager() {
     currentPage * parseInt(itemsPerPage)
   );
 
-  // Statistiques
+  // ============================================================
+  // STATISTIQUES
+  // ============================================================
+
   const stats = useMemo(() => {
     const totalBrut = paginatedVacations.reduce((sum, v) => sum + (v.montant_brut ?? 0), 0);
     const totalRetenu = paginatedVacations.reduce((sum, v) => sum + (v.montant_retenu ?? 0), 0);
@@ -291,7 +298,10 @@ export default function VacationsManager() {
     return (value ?? 0).toLocaleString();
   };
 
-  // ================= MUTATIONS =================
+  // ============================================================
+  // MUTATIONS CRUD
+  // ============================================================
+
   const createMutation = useMutation({
     mutationFn: (data: VacationInput) =>
       invoke('create_vacation', { input: buildBackendPayload(data) }),
@@ -320,7 +330,10 @@ export default function VacationsManager() {
     },
   });
 
-  // Fonctions utilitaires
+  // ============================================================
+  // FONCTIONS UTILITAIRES
+  // ============================================================
+
   const resetForm = () => {
     setEditingId(null);
     setFormData({
@@ -362,6 +375,10 @@ export default function VacationsManager() {
     setModalOpened(true);
   };
 
+  // ============================================================
+  // CALCUL DES MONTANTS
+  // ============================================================
+
   const handleCalculate = async () => {
     if (
       formData.enseignant_id === 0 ||
@@ -373,21 +390,35 @@ export default function VacationsManager() {
     setCalculating(true);
 
     try {
-      const payload = buildBackendPayload(formData);
-
-      const result = await invoke<VacationCalculated>(
-        "calculate_vacation",
-        { input: payload }
-      );
-
-      setCalculatedValues(result); // ✔ essentiel
+      const buildBackendPayload = (formData: VacationInput) => {
+        const payload = {
+          enseignant_id: formData.enseignant_id,
+          matiere_id: formData.matiere_id,
+          promotion_id: formData.promotion_id,
+          annee_scolaire_id: Number(formData.annee_scolaire),
+          nb_classe: formData.nb_classe ?? 0,
+          mois: Number(formData.mois),
+          annee: formData.annee,
+          // AJOUTER cycle_id et module_id
+          cycle_id: formData.cycle_id,
+          module_id: formData.module_id,
+        };
+        console.log("📦 Payload construit:", payload);
+        return payload;
+      };
+      const result = await invoke<VacationCalculated>("calculate_vacation", { input: payload });
+      setCalculatedValues(result);
     } catch (e) {
       console.error("Erreur calcul:", e);
     } finally {
       setCalculating(false);
     }
   };
-  
+
+  // ============================================================
+  // SOUMISSION DU FORMULAIRE
+  // ============================================================
+
   const handleSubmit = () => {
     if (
       formData.enseignant_id === 0 ||
@@ -407,6 +438,10 @@ export default function VacationsManager() {
     }
   };
 
+  // ============================================================
+  // GESTION DES ERREURS ET CHARGEMENT
+  // ============================================================
+
   if (isLoading) {
     return (
       <Card withBorder radius="md" p="lg" pos="relative">
@@ -425,6 +460,10 @@ export default function VacationsManager() {
       </Card>
     );
   }
+
+  // ============================================================
+  // RENDU PRINCIPAL
+  // ============================================================
 
   return (
     <Stack p="md" gap="lg">
@@ -580,25 +619,13 @@ export default function VacationsManager() {
                         </Table.Td>
                         <Table.Td>
                           <Group gap="xs" justify="center">
-                            <ActionIcon
-                              variant="subtle"
-                              color="blue"
-                              onClick={() => openEditModal(item)}
-                            >
+                            <ActionIcon variant="subtle" color="blue" onClick={() => openEditModal(item)}>
                               <IconEdit size={16} />
                             </ActionIcon>
-                            <ActionIcon
-                              variant="subtle"
-                              color="red"
-                              onClick={() => setDeleteId(item.id)}
-                            >
+                            <ActionIcon variant="subtle" color="red" onClick={() => setDeleteId(item.id)}>
                               <IconTrash size={16} />
                             </ActionIcon>
-                            <ActionIcon
-                              variant="subtle"
-                              color="gray"
-                              onClick={() => setViewItem(item)}
-                            >
+                            <ActionIcon variant="subtle" color="gray" onClick={() => setViewItem(item)}>
                               <IconEye size={16} />
                             </ActionIcon>
                           </Group>
@@ -636,7 +663,10 @@ export default function VacationsManager() {
         </Stack>
       </Card>
 
-      {/* MODAL D'AJOUT / MODIFICATION */}
+      {/* ================================================================ */}
+      {/* MODAL D'AJOUT / MODIFICATION - AVEC FLUX DE TRAVAIL EXPLIQUÉ */}
+      {/* ================================================================ */}
+
       <Modal
         opened={modalOpened}
         onClose={() => {
@@ -647,17 +677,39 @@ export default function VacationsManager() {
         size="xl"
       >
         <Stack gap="md">
+          {/* 
+            ============================================================
+            FLUX DE TRAVAIL POUR LA CRÉATION D'UNE VACATION
+            ============================================================
+            
+            Étape 1 : Sélectionner un enseignant → Badge avec statut affiché
+            Étape 2 : Sélectionner un cycle → Filtre les modules disponibles
+            Étape 3 : Sélectionner un module → Filtre les matières disponibles
+            Étape 4 : Sélectionner une matière → VH (Volume Horaire) affiché automatiquement
+            Étape 5 : Choisir promotion, nombre de classes, période → Calculs mis à jour en temps réel
+            Étape 6 : (Optionnel) Cliquer "Calculer" → Validation supplémentaire
+            Étape 7 : Cliquer "Enregistrer" → Sauvegarde (si VH suffisant)
+            
+            💡 Le calcul est automatique et en temps réel, 
+               donc pas besoin de cliquer sur "Calculer" avant d'enregistrer !
+            
+            ============================================================
+          */}
+
           <SimpleGrid cols={{ base: 1, sm: 2 }}>
+            {/* Étape 1 : Enseignant */}
             <Select
-              label="Enseignant"
+              label="1. Enseignant"
               placeholder="Sélectionnez un enseignant"
               data={enseignants.map(e => ({ value: String(e.id), label: `${e.nom} ${e.prenom}` }))}
               value={String(formData.enseignant_id || '')}
               onChange={(val) => setFormData({ ...formData, enseignant_id: parseInt(val || '0') })}
               withAsterisk
             />
+
+            {/* Étape 2 : Cycle */}
             <Select
-              label="Cycle"
+              label="2. Cycle"
               placeholder="Sélectionnez un cycle"
               data={cycles.map(c => ({ value: String(c.id), label: c.designation }))}
               value={String(formData.cycle_id || '')}
@@ -672,8 +724,10 @@ export default function VacationsManager() {
               }}
               withAsterisk
             />
+
+            {/* Étape 3 : Module */}
             <Select
-              label="Module"
+              label="3. Module"
               placeholder="Sélectionnez un module"
               data={modules
                 .filter(m => m.cycle_id === formData.cycle_id)
@@ -690,8 +744,10 @@ export default function VacationsManager() {
               withAsterisk
               disabled={!formData.cycle_id}
             />
+
+            {/* Étape 4 : Matière */}
             <Select
-              label="Matière"
+              label="4. Matière"
               placeholder="Sélectionnez une matière"
               data={matieres
                 .filter(m => m.module_id === formData.module_id)
@@ -701,14 +757,18 @@ export default function VacationsManager() {
               withAsterisk
               disabled={!formData.module_id}
             />
+
+            {/* Étape 5 : Nombre de classes */}
             <NumberInput
-              label="Nombre de classes"
+              label="5. Nombre de classes"
               placeholder="Ex: 3"
               value={formData.nb_classe || undefined}
               onChange={(val) => setFormData({ ...formData, nb_classe: val as number })}
               min={1}
               withAsterisk
             />
+
+            {/* Promotion */}
             <Select
               label="Promotion"
               placeholder="Sélectionnez une promotion"
@@ -717,6 +777,8 @@ export default function VacationsManager() {
               onChange={(val) => setFormData({ ...formData, promotion_id: parseInt(val || '0') })}
               withAsterisk
             />
+
+            {/* Taux horaire */}
             <NumberInput
               label="Taux horaire (F CFA)"
               value={formData.taux_horaire || undefined}
@@ -724,6 +786,8 @@ export default function VacationsManager() {
               min={1}
               withAsterisk
             />
+
+            {/* Taux de retenue */}
             <NumberInput
               label="Taux de retenue (%)"
               value={formData.taux_retenue || undefined}
@@ -732,6 +796,8 @@ export default function VacationsManager() {
               max={100}
               withAsterisk
             />
+
+            {/* Mois */}
             <Select
               label="Mois"
               data={MOIS_OPTIONS}
@@ -739,6 +805,8 @@ export default function VacationsManager() {
               onChange={(val) => setFormData({ ...formData, mois: val || '1' })}
               withAsterisk
             />
+
+            {/* Année */}
             <NumberInput
               label="Année"
               value={formData.annee}
@@ -747,6 +815,8 @@ export default function VacationsManager() {
               max={2100}
               withAsterisk
             />
+
+            {/* Année scolaire */}
             <Select
               label="Année scolaire"
               data={anneesScolaires.map(a => ({
@@ -754,34 +824,51 @@ export default function VacationsManager() {
                 label: a.libelle
               }))}
               value={formData.annee_scolaire}
-              onChange={(val) =>
-                setFormData({ ...formData, annee_scolaire: val || '' })
-              }
+              onChange={(val) => setFormData({ ...formData, annee_scolaire: val || '' })}
               withAsterisk
             />
           </SimpleGrid>
 
-          {/* Aperçu des calculs */}
+          {/* Aperçu des calculs (Étape 6 - Optionnel mais recommandé) */}
           {calculatedValues && (
             <Card withBorder bg="gray.0" p="sm">
               <Group justify="space-between" mb="xs">
-                <Text fw={700} size="sm">Aperçu du calcul</Text>
+                <Text fw={700} size="sm">📊 Aperçu du calcul</Text>
                 <Badge color={calculatedValues.global_ok ? "green" : "red"}>
-                  {calculatedValues.global_ok ? "Valide" : "Invalide"}
+                  {calculatedValues.global_ok ? "✅ Valide" : "❌ Invalide"}
                 </Badge>
               </Group>
               <SimpleGrid cols={3} spacing="xs">
-                <Text size="xs">VHT: {calculatedValues.vht_demande?.toFixed(1)}h</Text>
-                <Text size="xs">Brut: {formatNumber(calculatedValues.montant_brut)} F</Text>
-                <Text size="xs">Net: {formatNumber(calculatedValues.montant_net)} F</Text>
+                <Text size="xs">📚 VHT demandé: {calculatedValues.vht_demande?.toFixed(1)}h</Text>
+                <Text size="xs">💰 Brut: {formatNumber(calculatedValues.montant_brut)} F</Text>
+                <Text size="xs">💵 Net: {formatNumber(calculatedValues.montant_net)} F</Text>
               </SimpleGrid>
-              <Text size="xs" c="dimmed" mt="xs">{calculatedValues.message}</Text>
+              {calculatedValues.message && (
+                <Text size="xs" c="dimmed" mt="xs">ℹ️ {calculatedValues.message}</Text>
+              )}
             </Card>
           )}
 
+          {/* Message d'information sur le flux de travail */}
+          <Alert color="blue" variant="light" icon={<IconCalculator size={16} />}>
+            <Text size="sm" fw={500}>📋 Flux de travail</Text>
+            <Text size="xs" mt={3}>
+              1. Sélectionner un enseignant → Badge avec statut affiché<br />
+              2. Sélectionner un cycle → Filtre les modules<br />
+              3. Sélectionner un module → Filtre les matières<br />
+              4. Sélectionner une matière → VH affiché automatiquement<br />
+              5. Choisir promotion, nb classes, période → Calculs en temps réel<br />
+              6. (Optionnel) Cliquer "Calculer" → Validation supplémentaire<br />
+              7. Cliquer "Enregistrer" → Sauvegarde (si VH suffisant)<br />
+              <br />
+              💡 <strong>Le calcul est automatique et en temps réel, donc pas besoin de cliquer sur "Calculer" avant d'enregistrer !</strong>
+            </Text>
+          </Alert>
+
+          {/* Boutons d'action */}
           <Group justify="flex-end" mt="md">
-            <Button variant="light" onClick={handleCalculate} loading={calculating}>
-              Calculer
+            <Button variant="light" onClick={handleCalculate} loading={calculating} leftSection={<IconCalculator size={16} />}>
+              {calculatedValues ? "Recalculer" : "Calculer"}
             </Button>
             <Button variant="light" onClick={() => setModalOpened(false)}>
               Annuler
@@ -792,7 +879,7 @@ export default function VacationsManager() {
               variant="gradient"
               gradient={{ from: 'blue', to: 'cyan' }}
             >
-              {editingId ? 'Mettre à jour' : 'Créer'}
+              {editingId ? 'Mettre à jour' : 'Enregistrer'}
             </Button>
           </Group>
         </Stack>
@@ -883,6 +970,29 @@ export default function VacationsManager() {
           <Text size="sm">3. Les vacations sont calculées automatiquement selon les règles en vigueur</Text>
           <Text size="sm">4. Consultez l'historique dans le tableau principal</Text>
         </Stack>
+
+        <Divider my="md" />
+
+        <Title order={5} mb="md">📝 Flux de travail détaillé</Title>
+        <Stack gap="xs">
+          <Text size="sm">• <strong>Étape 1:</strong> Sélectionner un enseignant → Badge avec statut affiché</Text>
+          <Text size="sm">• <strong>Étape 2:</strong> Sélectionner un cycle → Filtre les modules disponibles</Text>
+          <Text size="sm">• <strong>Étape 3:</strong> Sélectionner un module → Filtre les matières disponibles</Text>
+          <Text size="sm">• <strong>Étape 4:</strong> Sélectionner une matière → VH (Volume Horaire) affiché automatiquement</Text>
+          <Text size="sm">• <strong>Étape 5:</strong> Choisir promotion, nombre de classes, période → Calculs mis à jour en temps réel</Text>
+          <Text size="sm">• <strong>Étape 6:</strong> (Optionnel) Cliquer "Calculer" → Validation supplémentaire</Text>
+          <Text size="sm">• <strong>Étape 7:</strong> Cliquer "Enregistrer" → Sauvegarde (si VH suffisant)</Text>
+        </Stack>
+
+        <Divider my="md" />
+
+        <Alert color="green" variant="light" icon={<IconCheck size={16} />}>
+          <Text size="sm" fw={500}>💡 Astuce importante</Text>
+          <Text size="xs">
+            Le calcul est automatique et en temps réel, donc pas besoin de cliquer sur "Calculer" avant d'enregistrer !
+            Le bouton "Calculer" sert uniquement à obtenir une validation supplémentaire et un aperçu détaillé.
+          </Text>
+        </Alert>
       </Card>
     </Stack>
   );

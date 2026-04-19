@@ -1,6 +1,7 @@
 // src-tauri/src/db.rs
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -15,16 +16,13 @@ impl DbState {
     }
 }
 
-// =========================
-// INITIALISATION DB
-// =========================
 pub async fn init_db(db_path: &Path) -> Result<SqlitePool, String> {
     if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Erreur dossier DB: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Erreur dossier DB: {}", e))?;
     }
 
-    let db_url = format!("sqlite:{}", db_path.to_string_lossy());
-
+    let db_url = format!("sqlite:{}", db_path.display());
+    
     let options = SqliteConnectOptions::from_str(&db_url)
         .map_err(|e| e.to_string())?
         .create_if_missing(true)
@@ -35,107 +33,12 @@ pub async fn init_db(db_path: &Path) -> Result<SqlitePool, String> {
         .map_err(|e| e.to_string())?;
 
     init_schema(&pool).await?;
-    
-    // Exécuter les migrations
     run_migrations(&pool).await?;
 
+    println!("✅ Base de données initialisée avec succès");
     Ok(pool)
 }
 
-// =========================
-// MIGRATIONS
-// =========================
-async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
-    // Créer une table pour suivre les migrations si elle n'existe pas
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS migrations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        "#,
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| format!("Erreur création table migrations: {}", e))?;
-
-    // Migration 1: Ajouter la colonne grade à signataires
-    migrate_signataires_add_grade(pool).await?;
-    
-    // Ajouter d'autres migrations ici si nécessaire
-    // migrate_autre_chose(pool).await?;
-
-    Ok(())
-}
-
-// =========================
-// UTILITAIRE: Vérifier si une colonne existe
-// =========================
-async fn table_has_column(pool: &SqlitePool, table: &str, column: &str) -> Result<bool, String> {
-    let query = format!("PRAGMA table_info({})", table);
-    let rows: Vec<(i32, String, String, i32, Option<String>, i32)> = 
-        sqlx::query_as(&query)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| format!("Erreur lecture schéma: {}", e))?;
-    
-    Ok(rows.iter().any(|row| row.1 == column))
-}
-
-// =========================
-// MIGRATION: Ajouter grade à signataires
-// =========================
-async fn migrate_signataires_add_grade(pool: &SqlitePool) -> Result<(), String> {
-    // Vérifier si la migration a déjà été appliquée
-    let already_applied: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM migrations WHERE name = ?"
-    )
-    .bind("add_grade_to_signataires")
-    .fetch_one(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    if already_applied > 0 {
-        println!("⏭️ Migration 'add_grade_to_signataires' déjà appliquée");
-        return Ok(());
-    }
-
-    let has_column = table_has_column(pool, "signataires", "grade").await?;
-
-    if !has_column {
-        println!("🔧 Migration: Ajout de la colonne 'grade' à la table signataires...");
-        
-        sqlx::query("ALTER TABLE signataires ADD COLUMN grade TEXT")
-            .execute(pool)
-            .await
-            .map_err(|e| format!("Erreur ajout colonne grade: {e}"))?;
-        
-        // Marquer la migration comme appliquée
-        sqlx::query("INSERT INTO migrations (name) VALUES (?)")
-            .bind("add_grade_to_signataires")
-            .execute(pool)
-            .await
-            .map_err(|e| format!("Erreur enregistrement migration: {e}"))?;
-        
-        println!("✅ Migration 'add_grade_to_signataires' appliquée avec succès");
-    } else {
-        println!("ℹ️ La colonne 'grade' existe déjà dans signataires");
-        
-        // Marquer quand même la migration comme appliquée si elle n'existe pas
-        sqlx::query("INSERT OR IGNORE INTO migrations (name) VALUES (?)")
-            .bind("add_grade_to_signataires")
-            .execute(pool)
-            .await
-            .map_err(|e| format!("Erreur enregistrement migration: {e}"))?;
-    }
-
-    Ok(())
-}
-
-// =========================
-// SCHEMA INITIAL
-// =========================
 async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     sqlx::query("PRAGMA foreign_keys = ON")
         .execute(pool)
@@ -177,7 +80,7 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
         r#"
         CREATE TABLE IF NOT EXISTS cycles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            designation TEXT NOT NULL,
+            designation TEXT NOT NULL UNIQUE,
             nb_classe INTEGER NOT NULL CHECK(nb_classe > 0)
         )
         "#,
@@ -230,8 +133,11 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
             CHECK (titre IN ('directeur','chef de service','chef de division/service','agent','retraité','autre')),
             CHECK (statut IN ('interne','externe'))
         )
-        "#
-    ).execute(pool).await.map_err(|e| e.to_string())?;
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
 
     // Banques
     sqlx::query(
@@ -266,18 +172,6 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    // Index pour compte actif unique
-    sqlx::query(
-        r#"
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_compte_actif
-        ON comptes_bancaires(enseignant_id)
-        WHERE actif = 1
-        "#,
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
     // Plafonds
     sqlx::query(
         r#"
@@ -290,8 +184,11 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
             CHECK (titre IN ('directeur','chef de service','chef de division/service','agent','retraité','autre')),
             CHECK (statut IN ('interne','externe'))
         )
-        "#
-    ).execute(pool).await.map_err(|e| e.to_string())?;
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
 
     // Vacations
     sqlx::query(
@@ -397,9 +294,7 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    // =========================
-    // INDEX
-    // =========================
+    // Index
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_modules_cycle ON modules(cycle_id)")
         .execute(pool)
         .await
@@ -425,19 +320,7 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
 
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_vacations_annee_scolaire ON vacations(annee_scolaire_id)",
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_signataires_actif ON signataires(actif)")
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_signataires_ordre ON signataires(ordre_signature)")
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_vacations_annee_scolaire ON vacations(annee_scolaire_id)")
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -447,9 +330,7 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
 
-    // =========================
-    // VUE (ETAT DE LIQUIDATION)
-    // =========================
+    // Vue liquidation
     sqlx::query("DROP VIEW IF EXISTS v_etat_liquidation")
         .execute(pool)
         .await
@@ -457,49 +338,45 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
 
     sqlx::query(
         r#"
-    CREATE VIEW v_etat_liquidation AS
-    SELECT 
-        v.id AS numero_ordre,
-        e.nom,
-        e.prenom,
-        e.titre,
-        e.statut,
-        c.designation AS cycle,
-        mod.designation AS module,
-        m.designation AS matiere,
-        b.designation AS banque,
-        m.vhoraire AS vhoraire,
-        v.nb_classe,
-        v.vht,
-        v.taux_horaire,
-        v.taux_retenue,
-        (v.vht * v.taux_horaire) AS montant_brut,
-        (v.vht * v.taux_horaire * v.taux_retenue / 100) AS montant_retenu,
-        (v.vht * v.taux_horaire * (1 - v.taux_retenue / 100)) AS montant_net,
-        CAST(v.mois AS INTEGER) AS mois,
-        CAST(v.annee AS INTEGER) AS annee,
-        a.libelle AS annee_scolaire,
-        p.libelle AS promotion
-    FROM vacations v
-    JOIN enseignants e ON e.id = v.enseignant_id
-    JOIN matieres m ON m.id = v.matiere_id
-    JOIN modules mod ON mod.id = m.module_id
-    JOIN cycles c ON c.id = mod.cycle_id
-    LEFT JOIN comptes_bancaires cb ON cb.enseignant_id = e.id AND cb.actif = 1
-    LEFT JOIN banques b ON b.id = cb.banque_id
-    JOIN annees_scolaires a ON a.id = v.annee_scolaire_id
-    JOIN promotions p ON p.id = v.promotion_id
-    "#,
+        CREATE VIEW v_etat_liquidation AS
+        SELECT 
+            v.id AS numero_ordre,
+            e.nom,
+            e.prenom,
+            e.titre,
+            e.statut,
+            c.designation AS cycle,
+            mod.designation AS module,
+            m.designation AS matiere,
+            b.designation AS banque,
+            m.vhoraire AS vhoraire,
+            v.nb_classe,
+            v.vht,
+            v.taux_horaire,
+            v.taux_retenue,
+            (v.vht * v.taux_horaire) AS montant_brut,
+            (v.vht * v.taux_horaire * v.taux_retenue / 100) AS montant_retenu,
+            (v.vht * v.taux_horaire * (1 - v.taux_retenue / 100)) AS montant_net,
+            CAST(v.mois AS INTEGER) AS mois,
+            CAST(v.annee AS INTEGER) AS annee,
+            a.libelle AS annee_scolaire,
+            p.libelle AS promotion
+        FROM vacations v
+        JOIN enseignants e ON e.id = v.enseignant_id
+        JOIN matieres m ON m.id = v.matiere_id
+        JOIN modules mod ON mod.id = m.module_id
+        JOIN cycles c ON c.id = mod.cycle_id
+        LEFT JOIN comptes_bancaires cb ON cb.enseignant_id = e.id AND cb.actif = 1
+        LEFT JOIN banques b ON b.id = cb.banque_id
+        JOIN annees_scolaires a ON a.id = v.annee_scolaire_id
+        JOIN promotions p ON p.id = v.promotion_id
+        "#,
     )
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
 
-    // =========================
-    // DONNEES INITIALES
-    // =========================
-
-    // Plafonds
+    // Données initiales
     sqlx::query(
         r#"
         INSERT OR IGNORE INTO plafonds (titre, statut, volume_horaire_max) VALUES
@@ -516,16 +393,17 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    // Signataires (sans grade pour l'instant)
     sqlx::query(
         r#"
         INSERT OR IGNORE INTO signataires (nom, prenom, fonction, titre, ordre_signature, actif) VALUES
             ('BELEM', 'Abdoulaye', 'Directeur Général', 'Directeur Général', 1, 1),
             ('SINDE', 'Salif', 'Directeur de l''Administration des Finances', 'Directeur Administratif et Financier', 2, 1)
         "#,
-    ).execute(pool).await.map_err(|e| e.to_string())?;
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
 
-    // Entete
     sqlx::query(
         r#"
         INSERT OR IGNORE INTO entete (cle, valeur) VALUES
@@ -548,20 +426,71 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    // =========================
-    // VERIFICATION FINALE
-    // =========================
-    sqlx::query("PRAGMA integrity_check")
-        .execute(pool)
+    Ok(())
+}
+
+async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| format!("Erreur création table migrations: {}", e))?;
+
+    migrate_signataires_add_grade(pool).await?;
+    Ok(())
+}
+
+async fn table_has_column(pool: &SqlitePool, table: &str, column: &str) -> Result<bool, String> {
+    let query = format!("PRAGMA table_info({})", table);
+    let rows: Vec<(i32, String, String, i32, Option<String>, i32)> = sqlx::query_as(&query)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("Erreur lecture schéma: {}", e))?;
+
+    Ok(rows.iter().any(|row| row.1 == column))
+}
+
+async fn migrate_signataires_add_grade(pool: &SqlitePool) -> Result<(), String> {
+    let already_applied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM migrations WHERE name = ?")
+        .bind("add_grade_to_signataires")
+        .fetch_one(pool)
         .await
         .map_err(|e| e.to_string())?;
 
-    sqlx::query("ANALYZE")
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    if already_applied > 0 {
+        return Ok(());
+    }
 
-    println!("✅ Base de données initialisée avec succès");
+    let has_column = table_has_column(pool, "signataires", "grade").await?;
+
+    if !has_column {
+        println!("🔧 Migration: Ajout de la colonne 'grade' à la table signataires...");
+        sqlx::query("ALTER TABLE signataires ADD COLUMN grade TEXT")
+            .execute(pool)
+            .await
+            .map_err(|e| format!("Erreur ajout colonne grade: {e}"))?;
+
+        sqlx::query("INSERT INTO migrations (name) VALUES (?)")
+            .bind("add_grade_to_signataires")
+            .execute(pool)
+            .await
+            .map_err(|e| format!("Erreur enregistrement migration: {e}"))?;
+
+        println!("✅ Migration 'add_grade_to_signataires' appliquée avec succès");
+    } else {
+        sqlx::query("INSERT OR IGNORE INTO migrations (name) VALUES (?)")
+            .bind("add_grade_to_signataires")
+            .execute(pool)
+            .await
+            .map_err(|e| format!("Erreur enregistrement migration: {e}"))?;
+    }
 
     Ok(())
 }

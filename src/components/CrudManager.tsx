@@ -29,7 +29,7 @@ interface ExtraData {
   cycles?: any[];
   modules?: any[];
   transformData?: (values: any) => any;
-  searchCommand?: string; // Pour les commandes de recherche personnalisées
+  searchCommand?: string;
   customCommands?: {
     get?: string;
     create?: string;
@@ -37,7 +37,6 @@ interface ExtraData {
     delete?: string;
     search?: string;
   };
-  // Champs supplémentaires pour la validation
   additionalValidate?: Record<string, (value: any) => string | null>;
 }
 
@@ -51,9 +50,9 @@ interface ManagerProps<T> {
   validate?: any;
   extraData?: ExtraData;
   transformData?: (values: any) => any;
-  useSearch?: boolean; // Activer/désactiver la recherche
-  usePagination?: boolean; // Activer/désactiver la pagination
-  itemsPerPageOptions?: string[]; // Options pour les lignes par page
+  useSearch?: boolean;
+  usePagination?: boolean;
+  itemsPerPageOptions?: string[];
 }
 
 // ================= COMPONENT =================
@@ -86,12 +85,10 @@ function CrudManager<T extends { id: number }>({
 
   // ================= COMMAND MAPPING =================
   const getCommandName = (type: 'get' | 'create' | 'update' | 'delete' | 'search') => {
-    // Utiliser les commandes personnalisées si fournies
     if (extraData?.customCommands && extraData.customCommands[type]) {
       return extraData.customCommands[type]!;
     }
 
-    // Mapping par défaut basé sur le schema.sql
     const commandMap: Record<string, Record<string, string>> = {
       get: {
         'annees_scolaires': 'get_annees_scolaires',
@@ -153,12 +150,10 @@ function CrudManager<T extends { id: number }>({
       }
     };
 
-    // Retourner la commande correspondante ou la commande par défaut
     if (commandMap[type] && commandMap[type][entity]) {
       return commandMap[type][entity];
     }
 
-    // Commande par défaut
     const defaultCommands: Record<string, string> = {
       get: `get_${entity}`,
       create: `create_${singular}`,
@@ -166,7 +161,7 @@ function CrudManager<T extends { id: number }>({
       delete: `delete_${singular}`,
       search: `search_${entity}`,
     };
-    
+
     return defaultCommands[type] || `get_${entity}`;
   };
 
@@ -178,36 +173,38 @@ function CrudManager<T extends { id: number }>({
   } = useQuery({
     queryKey: [entity, search],
     queryFn: async () => {
-      // Utiliser la recherche si activée et si terme de recherche
+      console.log(`📡 Fetching ${entity}...`);
+
       if (useSearch && search.trim().length > 0) {
         const searchCommand = extraData?.searchCommand || getCommandName('search');
         try {
+          console.log(`🔍 Searching ${entity} with:`, search);
           const result = await invoke(searchCommand, { search: search.trim() });
+          console.log(`✅ Search result:`, result);
           return Array.isArray(result) ? result : [];
         } catch (e) {
           console.warn("Search failed, falling back to get all", e);
-          // Fallback: récupérer tous les éléments
           const result = await invoke(getCommandName('get'));
           return Array.isArray(result) ? result : [];
         }
       }
-      
-      // Récupération normale
+
       const result = await invoke(getCommandName('get'));
+      console.log(`✅ Fetched ${entity}:`, result);
       return Array.isArray(result) ? result : [];
     },
   });
 
   const data = Array.isArray(rawData) ? rawData : [];
 
-  // ================= FILTRAGE LOCAL (si pas de recherche backend) =================
+  // ================= FILTRAGE LOCAL =================
   const filteredData = !useSearch || search.trim().length === 0
     ? data.filter((item: T) =>
-        Object.values(item)
-          .join(" ")
-          .toLowerCase()
-          .includes(search.toLowerCase())
-      )
+      Object.values(item)
+        .join(" ")
+        .toLowerCase()
+        .includes(search.toLowerCase())
+    )
     : data;
 
   // ================= PAGINATION =================
@@ -217,20 +214,20 @@ function CrudManager<T extends { id: number }>({
     : filteredData;
 
   // ================= FORM =================
-  // Fusionner la validation par défaut avec la validation supplémentaire
   const mergedValidate = {
     ...validate,
     ...extraData?.additionalValidate,
   };
 
-  const form = useForm({ 
-    initialValues, 
+  const form = useForm({
+    initialValues,
     validate: mergedValidate,
     validateInputOnBlur: true,
   });
 
   // ================= ACTIONS =================
   const openCreate = () => {
+    console.log("📝 Opening create modal");
     setEditing(null);
     form.setValues(initialValues);
     form.resetDirty();
@@ -238,6 +235,7 @@ function CrudManager<T extends { id: number }>({
   };
 
   const openEdit = (item: T) => {
+    console.log("✏️ Opening edit modal for:", item);
     setEditing(item);
     form.setValues(item);
     form.resetDirty();
@@ -246,12 +244,15 @@ function CrudManager<T extends { id: number }>({
 
   // ================= SUBMIT =================
   const handleSubmit = async (values: any) => {
+    console.log("📤 Submitting form...", { editing, values });
+
     try {
       let dataToSend = values;
       const transform = transformData || extraData?.transformData;
 
       if (transform) {
         dataToSend = transform(values);
+        console.log("🔄 Transformed data:", dataToSend);
       }
 
       // Nettoyer les données (enlever les champs undefined)
@@ -262,21 +263,24 @@ function CrudManager<T extends { id: number }>({
       });
 
       if (editing) {
-        // Mise à jour
-        await invoke(getCommandName('update'), {
+        // Mise à jour - envoyer les champs directement
+        const updatePayload = {
           id: editing.id,
-          data: dataToSend,
-        });
+          ...dataToSend
+        };
+        console.log(`📡 Calling ${getCommandName('update')} with:`, updatePayload);
+        await invoke(getCommandName('update'), updatePayload);
+
         notifications.show({
           title: "Succès",
           message: `${title} modifié${title.endsWith('e') ? 'e' : ''} avec succès`,
           color: "green",
         });
       } else {
-        // Création
-        await invoke(getCommandName('create'), {
-          data: dataToSend,
-        });
+        // Création - envoyer les champs directement
+        console.log(`📡 Calling ${getCommandName('create')} with:`, dataToSend);
+        await invoke(getCommandName('create'), dataToSend);
+
         notifications.show({
           title: "Succès",
           message: `${title} créé${title.endsWith('e') ? 'e' : ''} avec succès`,
@@ -290,6 +294,7 @@ function CrudManager<T extends { id: number }>({
       refetch();
 
     } catch (e: any) {
+      console.error("❌ Submit error:", e);
       notifications.show({
         title: "Erreur",
         message: e.toString() || "Une erreur est survenue",
@@ -302,10 +307,13 @@ function CrudManager<T extends { id: number }>({
   const confirmDelete = async () => {
     if (!deleteId) return;
 
+    console.log(`🗑️ Deleting ${entity} with id:`, deleteId);
+
     try {
       setDeleteLoading(true);
-      
+
       await invoke(getCommandName('delete'), { id: deleteId });
+      console.log(`✅ Deleted successfully`);
 
       notifications.show({
         title: "Succès",
@@ -318,6 +326,7 @@ function CrudManager<T extends { id: number }>({
       refetch();
 
     } catch (e: any) {
+      console.error("❌ Delete error:", e);
       notifications.show({
         title: "Erreur",
         message: e.toString() || "Impossible de supprimer",
@@ -348,7 +357,19 @@ function CrudManager<T extends { id: number }>({
             setCurrentPage(1);
           }}
           mb="md"
-          __clearable
+          rightSection={
+            search && (
+              <ActionIcon
+                onClick={() => {
+                  setSearch("");
+                  setCurrentPage(1);
+                }}
+                size="sm"
+              >
+                <IconTrash size={14} />
+              </ActionIcon>
+            )
+          }
         />
       )}
 
@@ -373,7 +394,7 @@ function CrudManager<T extends { id: number }>({
               </Table.Tr>
             ) : (
               paginatedData.map((item: T, index: number) => {
-                const globalIndex = usePagination 
+                const globalIndex = usePagination
                   ? (currentPage - 1) * itemsPerPage + index + 1
                   : index + 1;
                 return (
@@ -384,17 +405,17 @@ function CrudManager<T extends { id: number }>({
                     ))}
                     <Table.Td>
                       <Group gap="xs">
-                        <ActionIcon 
-                          variant="subtle" 
-                          color="blue" 
+                        <ActionIcon
+                          variant="subtle"
+                          color="blue"
                           onClick={() => openEdit(item)}
                           aria-label="Modifier"
                         >
                           <IconEdit size={16} />
                         </ActionIcon>
-                        <ActionIcon 
-                          variant="subtle" 
-                          color="red" 
+                        <ActionIcon
+                          variant="subtle"
+                          color="red"
                           onClick={() => setDeleteId(item.id)}
                           aria-label="Supprimer"
                         >
@@ -431,12 +452,12 @@ function CrudManager<T extends { id: number }>({
       )}
 
       {/* MODAL FORMULAIRE */}
-      <Modal 
-        opened={modal} 
+      <Modal
+        opened={modal}
         onClose={() => {
           setModal(false);
           form.reset();
-        }} 
+        }}
         title={editing ? `Modifier ${title}` : `Ajouter ${title}`}
         size="lg"
       >
@@ -460,9 +481,9 @@ function CrudManager<T extends { id: number }>({
       </Modal>
 
       {/* MODAL CONFIRMATION SUPPRESSION */}
-      <Modal 
-        opened={deleteId !== null} 
-        onClose={() => setDeleteId(null)} 
+      <Modal
+        opened={deleteId !== null}
+        onClose={() => setDeleteId(null)}
         title="Confirmation"
         centered
       >

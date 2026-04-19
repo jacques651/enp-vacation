@@ -45,7 +45,7 @@ fn validate(designation: &str) -> Result<(), String> {
 }
 
 // =========================
-// GET ALL
+// GET ALL - CORRIGÉ : tri par ID
 // =========================
 
 #[tauri::command]
@@ -62,7 +62,7 @@ pub async fn get_modules(
             c.designation AS cycle_designation
         FROM modules m
         JOIN cycles c ON c.id = m.cycle_id
-        ORDER BY m.designation
+        ORDER BY m.id ASC
         "#
     )
     .fetch_all(&state.pool)
@@ -201,7 +201,7 @@ pub async fn delete_module(
 }
 
 // =========================
-// SEARCH
+// SEARCH - CORRIGÉ : tri par ID
 // =========================
 
 #[tauri::command]
@@ -222,7 +222,7 @@ pub async fn search_modules(
         FROM modules m
         JOIN cycles c ON c.id = m.cycle_id
         WHERE m.designation LIKE ?
-        ORDER BY m.designation
+        ORDER BY m.id ASC
         "#
     )
     .bind(pattern)

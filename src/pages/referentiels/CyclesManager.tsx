@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import {
   Stack,
   Card,
@@ -6,22 +6,20 @@ import {
   Text,
   Group,
   Button,
-  Alert,
   Table,
   Badge,
-  Divider,
-  ThemeIcon,
   TextInput,
   NumberInput,
   ActionIcon,
-  ScrollArea,
-  LoadingOverlay,
   Modal,
-  Pagination,
+  Alert,
+  Divider,
+  ThemeIcon,
 } from '@mantine/core';
-import { IconSchool, IconCheck, IconAlertCircle, IconEdit, IconTrash, IconPlus, IconSearch } from '@tabler/icons-react';
+import { IconPlus, IconEdit, IconTrash, IconSchool } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { notifications } from '@mantine/notifications';
 
 interface Cycle {
   id: number;
@@ -29,172 +27,199 @@ interface Cycle {
   nb_classe: number;
 }
 
-interface CreateCycle {
-  designation: string;
-  nb_classe: number;
-}
-
 export default function CyclesManager() {
   const queryClient = useQueryClient();
-  const [modalOpened, setModalOpened] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [formDesignation, setFormDesignation] = useState('');
-  const [formNbClasse, setFormNbClasse] = useState<number | undefined>(undefined);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [sortBy, setSortBy] = useState<'designation' | 'nb_classe' | 'id'>('designation');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const itemsPerPage = 10;
+  const [designation, setDesignation] = useState('');
+  const [nbClasse, setNbClasse] = useState<number>(1);
 
-  // Récupérer tous les cycles
-  const { data: cycles = [], isLoading, error } = useQuery<Cycle[]>({
+  // Récupérer les cycles
+  const { data: cycles = [], isLoading, error } = useQuery({
     queryKey: ['cycles'],
     queryFn: async () => {
-      const result = await invoke('get_cycles');
-      if (!Array.isArray(result)) return [];
+      const result = await invoke<Cycle[]>('get_cycles');
       return result;
     },
   });
 
-  // Filtrer et trier les données
-  const filteredAndSortedData = useMemo(() => {
-    // Filtrage
-    let filtered = cycles.filter(c =>
-      c.designation.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-
-    // Tri
-    return [...filtered].sort((a, b) => {
-      let comparison = 0;
-      if (sortBy === 'id') {
-        comparison = a.id - b.id;
-      } else if (sortBy === 'designation') {
-        comparison = a.designation.localeCompare(b.designation);
-      } else if (sortBy === 'nb_classe') {
-        comparison = a.nb_classe - b.nb_classe;
-      }
-      return sortOrder === 'asc' ? comparison : -comparison;
-    });
-  }, [cycles, searchTerm, sortBy, sortOrder]);
-
-  // Pagination
-  const totalPages = Math.ceil(filteredAndSortedData.length / itemsPerPage);
-  const paginatedData = filteredAndSortedData.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
-  // Créer un cycle
+  // Créer un cycle (avec payload)
   const createMutation = useMutation({
-    mutationFn: (data: CreateCycle) => invoke('create_cycle'),
+    mutationFn: async (data: { designation: string; nb_classe: number }) => {
+      console.log('Envoi:', data);
+      return await invoke('create_cycle', { payload: data });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cycles'] });
-      setModalOpened(false);
+      setModalOpen(false);
       resetForm();
+      notifications.show({
+        title: 'Succès',
+        message: 'Cycle créé avec succès',
+        color: 'green',
+      });
     },
-    onError: (error: string) => {
-      console.error('Erreur:', error);
-    }
+    onError: (error: any) => {
+      notifications.show({
+        title: 'Erreur',
+        message: error.toString(),
+        color: 'red',
+      });
+    },
   });
 
-  // Mettre à jour un cycle
+  // Modifier un cycle (avec payload)
   const updateMutation = useMutation({
-    mutationFn: ({ id, ...data }: Cycle) => invoke('update_cycle', { id, ...data }),
+    mutationFn: async (data: { id: number; designation: string; nb_classe: number }) => {
+      return await invoke('update_cycle', { payload: data });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cycles'] });
-      setModalOpened(false);
+      setModalOpen(false);
       resetForm();
+      notifications.show({
+        title: 'Succès',
+        message: 'Cycle modifié avec succès',
+        color: 'green',
+      });
     },
-    onError: (error: string) => {
-      console.error('Erreur:', error);
-    }
+    onError: (error: any) => {
+      notifications.show({
+        title: 'Erreur',
+        message: error.toString(),
+        color: 'red',
+      });
+    },
   });
 
   // Supprimer un cycle
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => invoke('delete_cycle', { id }),
+    mutationFn: async (id: number) => {
+      return await invoke('delete_cycle', { id });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cycles'] });
-      setDeleteId(null);
+      notifications.show({
+        title: 'Succès',
+        message: 'Cycle supprimé avec succès',
+        color: 'green',
+      });
     },
-    onError: (error: string) => {
-      console.error('Erreur:', error);
-    }
+    onError: (error: any) => {
+      notifications.show({
+        title: 'Erreur',
+        message: error.toString(),
+        color: 'red',
+      });
+    },
   });
 
   const resetForm = () => {
     setEditingId(null);
-    setFormDesignation('');
-    setFormNbClasse(undefined);
+    setDesignation('');
+    setNbClasse(1);
   };
 
-  const openCreateModal = () => {
+  const openCreate = () => {
     resetForm();
-    setModalOpened(true);
+    setModalOpen(true);
   };
 
-  const openEditModal = (item: Cycle) => {
-    setEditingId(item.id);
-    setFormDesignation(item.designation);
-    setFormNbClasse(item.nb_classe);
-    setModalOpened(true);
+  const openEdit = (cycle: Cycle) => {
+    setEditingId(cycle.id);
+    setDesignation(cycle.designation);
+    setNbClasse(cycle.nb_classe);
+    setModalOpen(true);
   };
 
   const handleSubmit = () => {
-    if (!formDesignation.trim()) return;
-    if (!formNbClasse || formNbClasse < 1) return;
+    if (!designation.trim()) {
+      notifications.show({
+        title: 'Erreur',
+        message: 'La désignation est requise',
+        color: 'red',
+      });
+      return;
+    }
+    if (nbClasse < 1) {
+      notifications.show({
+        title: 'Erreur',
+        message: 'Le nombre de classes doit être supérieur à 0',
+        color: 'red',
+      });
+      return;
+    }
+
+    const data = { designation: designation.trim(), nb_classe: nbClasse };
 
     if (editingId) {
-      updateMutation.mutate({
-        id: editingId,
-        designation: formDesignation.trim(),
-        nb_classe: formNbClasse,
-      });
+      updateMutation.mutate({ ...data, id: editingId });
     } else {
-      createMutation.mutate({
-        designation: formDesignation.trim(),
-        nb_classe: formNbClasse,
-      });
+      createMutation.mutate(data);
     }
-  };
-
-  const handleSort = (column: 'id' | 'designation' | 'nb_classe') => {
-    if (sortBy === column) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortBy(column);
-      setSortOrder('asc');
-    }
-    setCurrentPage(1);
   };
 
   if (isLoading) {
     return (
-      <Card withBorder radius="md" p="lg" pos="relative">
-        <LoadingOverlay visible={true} />
-        <Text>Chargement des cycles...</Text>
-      </Card>
+      <Stack p="md">
+        <Card withBorder radius="md" p="lg" bg="adminBlue.8">
+          <Group justify="space-between">
+            <Stack gap={2}>
+              <Title order={2} c="white">
+                Gestion des cycles
+              </Title>
+              <Text size="sm" c="gray.3">
+                Gérez les cycles d'études
+              </Text>
+            </Stack>
+            <ThemeIcon size={48} radius="md" color="white" variant="light">
+              <IconSchool size={28} />
+            </ThemeIcon>
+          </Group>
+        </Card>
+        <Card withBorder radius="md" p="lg">
+          <Text>Chargement des cycles...</Text>
+        </Card>
+      </Stack>
     );
   }
 
   if (error) {
     return (
-      <Card withBorder radius="md" p="lg">
-        <Alert icon={<IconAlertCircle size={16} />} color="red" title="Erreur">
-          Impossible de charger les cycles
-        </Alert>
-      </Card>
+      <Stack p="md">
+        <Card withBorder radius="md" p="lg" bg="adminBlue.8">
+          <Group justify="space-between">
+            <Stack gap={2}>
+              <Title order={2} c="white">
+                Gestion des cycles
+              </Title>
+              <Text size="sm" c="gray.3">
+                Gérez les cycles d'études
+              </Text>
+            </Stack>
+            <ThemeIcon size={48} radius="md" color="white" variant="light">
+              <IconSchool size={28} />
+            </ThemeIcon>
+          </Group>
+        </Card>
+        <Card withBorder radius="md" p="lg">
+          <Alert color="red" title="Erreur">
+            Impossible de charger les cycles: {error.toString()}
+          </Alert>
+        </Card>
+      </Stack>
     );
   }
 
   return (
     <Stack p="md" gap="lg">
-      {/* HEADER */}
+      {/* Header */}
       <Card withBorder radius="md" p="lg" bg="adminBlue.8">
         <Group justify="space-between">
           <Stack gap={2}>
-            <Title order={2} c="white">Gestion des cycles</Title>
+            <Title order={2} c="white">
+              Gestion des cycles
+            </Title>
             <Text size="sm" c="gray.3">
               Gérez les cycles d'études et leur nombre de classes
             </Text>
@@ -205,20 +230,21 @@ export default function CyclesManager() {
         </Group>
       </Card>
 
-      {/* CONTENU PRINCIPAL */}
+      {/* Contenu principal */}
       <Card withBorder radius="md" p="lg">
         <Stack gap="md">
-          {/* EN-TÊTE DU CARD */}
+          {/* En-tête tableau */}
           <Group justify="space-between" align="flex-end">
             <div>
               <Title order={4}>Cycles</Title>
               <Text size="sm" c="dimmed">
-                {filteredAndSortedData.length} cycle{filteredAndSortedData.length > 1 ? 's' : ''} enregistré{filteredAndSortedData.length > 1 ? 's' : ''}
+                {cycles.length} cycle{cycles.length > 1 ? 's' : ''} enregistré
+                {cycles.length > 1 ? 's' : ''}
               </Text>
             </div>
             <Button
               leftSection={<IconPlus size={16} />}
-              onClick={openCreateModal}
+              onClick={openCreate}
               variant="gradient"
               gradient={{ from: 'blue', to: 'cyan' }}
             >
@@ -228,156 +254,95 @@ export default function CyclesManager() {
 
           <Divider />
 
-          {/* RECHERCHE */}
-          <TextInput
-            placeholder="Rechercher par désignation..."
-            leftSection={<IconSearch size={16} />}
-            value={searchTerm}
-            onChange={(e) => {
-              setSearchTerm(e.target.value);
-              setCurrentPage(1);
-            }}
-          />
-
-          {/* TABLEAU DES CYCLES */}
-          {filteredAndSortedData.length === 0 ? (
-            <Alert icon={<IconAlertCircle size={16} />} color="blue" variant="light">
+          {/* Tableau */}
+          {cycles.length === 0 ? (
+            <Alert color="blue" variant="light">
               Aucun cycle trouvé. Cliquez sur "Ajouter" pour commencer.
             </Alert>
           ) : (
-            <>
-              <ScrollArea style={{ maxHeight: 500 }}>
-                <Table striped highlightOnHover>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th 
-                        style={{ width: 80, cursor: 'pointer' }}
-                        onClick={() => handleSort('id')}
-                      >
-                        <Group gap={4}>
-                          N°
-                          <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
-                        </Group>
-                      </Table.Th>
-                      <Table.Th 
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => handleSort('designation')}
-                      >
-                        <Group gap={4}>
-                          Désignation
-                          <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
-                        </Group>
-                      </Table.Th>
-                      <Table.Th 
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => handleSort('nb_classe')}
-                      >
-                        <Group gap={4}>
-                          Nombre de classes
-                          <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
-                        </Group>
-                      </Table.Th>
-                      <Table.Th style={{ width: 100, textAlign: 'center' }}>Actions</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {paginatedData.map((item, index) => {
-                      const numero = (currentPage - 1) * itemsPerPage + index + 1;
-                      return (
-                        <Table.Tr key={item.id}>
-                          <Table.Td>
-                            <Badge color="gray" variant="light" size="sm">
-                              {numero}
-                            </Badge>
-                          </Table.Td>
-                          <Table.Td>
-                            <Text size="sm" fw={500}>
-                              {item.designation}
-                            </Text>
-                          </Table.Td>
-                          <Table.Td>
-                            <Badge color="teal" variant="light" size="sm">
-                              {item.nb_classe} classe{item.nb_classe > 1 ? 's' : ''}
-                            </Badge>
-                          </Table.Td>
-                          <Table.Td>
-                            <Group gap="xs" justify="center">
-                              <ActionIcon
-                                variant="subtle"
-                                color="blue"
-                                onClick={() => openEditModal(item)}
-                              >
-                                <IconEdit size={16} />
-                              </ActionIcon>
-                              <ActionIcon
-                                variant="subtle"
-                                color="red"
-                                onClick={() => setDeleteId(item.id)}
-                              >
-                                <IconTrash size={16} />
-                              </ActionIcon>
-                            </Group>
-                          </Table.Td>
-                        </Table.Tr>
-                      );
-                    })}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea>
-
-              {/* PAGINATION */}
-              {totalPages > 1 && (
-                <Group justify="center" mt="md">
-                  <Pagination 
-                    value={currentPage} 
-                    onChange={setCurrentPage} 
-                    total={totalPages} 
-                    color="blue"
-                  />
-                </Group>
-              )}
-            </>
-          )}
-
-          {/* MESSAGE DE SUCCÈS */}
-          {(createMutation.isSuccess || updateMutation.isSuccess) && (
-            <Alert icon={<IconCheck size={16} />} color="green" variant="light">
-              Cycle {createMutation.isSuccess ? 'ajouté' : 'modifié'} avec succès
-            </Alert>
+            <Table striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th style={{ width: 80 }}>ID</Table.Th>
+                  <Table.Th>Désignation</Table.Th>
+                  <Table.Th style={{ width: 150 }}>Nombre de classes</Table.Th>
+                  <Table.Th style={{ width: 100, textAlign: 'center' }}>
+                    Actions
+                  </Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {cycles.map((cycle) => (
+                  <Table.Tr key={cycle.id}>
+                    <Table.Td>
+                      <Badge color="gray" variant="light" size="sm">
+                        {cycle.id}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" fw={500}>
+                        {cycle.designation}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge color="teal" variant="light" size="sm">
+                        {cycle.nb_classe} classe{cycle.nb_classe > 1 ? 's' : ''}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap="xs" justify="center">
+                        <ActionIcon
+                          variant="subtle"
+                          color="blue"
+                          onClick={() => openEdit(cycle)}
+                        >
+                          <IconEdit size={16} />
+                        </ActionIcon>
+                        <ActionIcon
+                          variant="subtle"
+                          color="red"
+                          onClick={() => deleteMutation.mutate(cycle.id)}
+                        >
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
           )}
         </Stack>
       </Card>
 
-      {/* MODAL D'AJOUT / MODIFICATION */}
+      {/* Modal */}
       <Modal
-        opened={modalOpened}
-        onClose={() => {
-          setModalOpened(false);
-          resetForm();
-        }}
-        title={editingId ? "Modifier le cycle" : "Ajouter un cycle"}
+        opened={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editingId ? 'Modifier le cycle' : 'Ajouter un cycle'}
         size="md"
+        radius="md"
       >
         <Stack gap="md">
           <TextInput
             label="Désignation"
             placeholder="Ex: Premier cycle, Second cycle, Licence..."
-            value={formDesignation}
-            onChange={(e) => setFormDesignation(e.target.value)}
+            value={designation}
+            onChange={(e) => setDesignation(e.target.value)}
             withAsterisk
             description="Nom du cycle d'études"
           />
           <NumberInput
             label="Nombre de classes"
             placeholder="Ex: 6"
-            value={formNbClasse}
-            onChange={(val) => setFormNbClasse(val as number)}
+            value={nbClasse}
+            onChange={(val) => setNbClasse(Number(val))}
             min={1}
             withAsterisk
             description="Nombre de classes dans ce cycle"
           />
           <Group justify="flex-end" mt="md">
-            <Button variant="light" onClick={() => setModalOpened(false)}>
+            <Button variant="light" onClick={() => setModalOpen(false)}>
               Annuler
             </Button>
             <Button
@@ -392,42 +357,28 @@ export default function CyclesManager() {
         </Stack>
       </Modal>
 
-      {/* MODAL DE CONFIRMATION SUPPRESSION */}
-      <Modal
-        opened={deleteId !== null}
-        onClose={() => setDeleteId(null)}
-        title="Confirmation"
-        centered
-      >
-        <Stack>
-          <Text>Êtes-vous sûr de vouloir supprimer ce cycle ?</Text>
-          <Text size="sm" c="dimmed">Cette action est irréversible.</Text>
-          <Text size="sm" c="orange" fw={500}>
-            ⚠️ Attention: Un cycle contenant des modules ne peut pas être supprimé.
-          </Text>
-          <Group justify="flex-end" mt="md">
-            <Button variant="light" onClick={() => setDeleteId(null)}>
-              Annuler
-            </Button>
-            <Button
-              color="red"
-              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
-              loading={deleteMutation.isPending}
-            >
-              Supprimer
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      {/* SECTION INSTRUCTIONS */}
+      {/* Instructions */}
       <Card withBorder radius="md" p="lg">
-        <Title order={5} mb="md">📋 Instructions</Title>
+        <Title order={5} mb="md">
+          📋 Instructions
+        </Title>
         <Stack gap="xs">
           <Text size="sm">1. Les cycles représentent les différents corps élèves</Text>
           <Text size="sm">2. Chaque cycle peut avoir un nombre spécifique de classes</Text>
           <Text size="sm">3. Les cycles sont utilisés pour organiser les modules et matières</Text>
           <Text size="sm">4. La suppression d'un cycle n'est possible que s'il n'a pas de modules associés</Text>
+        </Stack>
+
+        <Divider my="md" />
+
+        <Title order={5} mb="md">
+          📝 Notes importantes
+        </Title>
+        <Stack gap="xs">
+          <Text size="sm">• La désignation du cycle doit être unique</Text>
+          <Text size="sm">• Le nombre de classes influence le calcul des volumes horaires</Text>
+          <Text size="sm">• Les modules et matières sont rattachés à un cycle</Text>
+          <Text size="sm">• Un cycle utilisé ne peut pas être supprimé</Text>
         </Stack>
       </Card>
     </Stack>

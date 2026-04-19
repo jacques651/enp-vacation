@@ -1,10 +1,14 @@
+// src-tauri/src/main.rs
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
 mod db;
 mod models;
 
+// IMPORTER TOUTES LES FONCTIONS DES COMMANDES
 use commands::*;
+
 use db::DbState;
 use tauri::Manager;
 
@@ -24,12 +28,16 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+
             // ================= CYCLES =================
             get_cycles,
             get_cycle_by_id,
             create_cycle,
             update_cycle,
             delete_cycle,
+            search_cycles,
+            count_cycles,
+            get_cycle_by_designation,
             
             // ================= MODULES =================
             get_modules,
@@ -53,6 +61,7 @@ fn main() {
             create_enseignant,
             update_enseignant,
             delete_enseignant,
+            get_enseignants_with_cumul,
             
             // ================= BANQUES =================
             get_banques,
@@ -63,6 +72,7 @@ fn main() {
             
             // ================= COMPTES BANCAIRES =================
             get_comptes_by_enseignant,
+            get_comptes,
             create_compte_bancaire,
             get_compte_by_id,
             set_compte_actif,
@@ -99,13 +109,18 @@ fn main() {
             update_signataire,
             delete_signataire,
             search_signataires,
+            get_signataires_actifs,
             
             // ================= ENTETE (PARAMETRES) =================
+            create_entete,
             get_entetes,
             get_entete_by_key,
-            get_entete_value,
+            get_entete_by_id,
+            get_entete_values,
             set_entete_value,
             delete_entete,
+            init_default_entetes,
+            update_entete,
             
             // ================= GESTION DU LOGO =================
             upload_logo_base64,
@@ -129,14 +144,15 @@ fn main() {
             // ================= DASHBOARD =================
             get_dashboard_stats,
             
-            // ================= IMPORT (TOUTES LES COMMANDES) =================
-            
-           
+            // ================= IMPORT =================
+            import_cycles,
+            import_modules,
             import_matieres,
             import_enseignants,
             import_banques,
             import_promotions,
             import_plafonds,
+            import_annees_scolaires,
             import_comptes_bancaires,
             
             // ================= EXPORT =================

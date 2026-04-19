@@ -2,6 +2,7 @@ import { Modal, Grid, Select, NumberInput, Button, Card, Text, Group, Badge, Sta
 import { IconInfoCircle, IconAlertCircle, IconCalculator, IconUser, IconBook, IconCalendar, IconChartBar, IconClock, IconSchool } from "@tabler/icons-react";
 import { useQuery } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
+import { useEffect } from "react";
 
 interface Props {
     opened: boolean;
@@ -44,22 +45,60 @@ export default function VacationFormModal({
     calculatedValues = null
 }: Props) {
 
+    // ============================================================
+    // 1. RÉCUPÉRATION DES DONNÉES
+    // ============================================================
+
     // Récupération des années scolaires depuis le backend
     const { data: anneesScolairesList = [] } = useQuery<AnneeScolaire[]>({
         queryKey: ['annees_scolaires'],
         queryFn: () => invoke('get_annees_scolaires'),
     });
 
+    // Sélections actuelles pour affichage
     const selectedMatiere = matieres?.find(m => m.id === form.values.matiere_id);
     const selectedCycle = cycles?.find(c => c.id === form.values.cycle_id);
     const selectedEnseignant = enseignants?.find(e => e.id === form.values.enseignant_id);
     const selectedPromotion = promotions?.find(p => p.id === form.values.promotion_id);
 
-    const vhoraire = selectedMatiere?.vhoraire || 0;
-    const nbClasseCycle = selectedCycle?.nb_classe || 1;
-    const vhtDemande = (form.values.nb_classe || 1) * vhoraire;
-    const vhtTotal = vhoraire * nbClasseCycle;
+    // ============================================================
+    // 2. EFFETS AUTOMATIQUES (Réinitialisation des sélections)
+    // ============================================================
 
+    // Quand le cycle change → on réinitialise module, matière et VH
+    useEffect(() => {
+        if (form.values.cycle_id) {
+            form.setFieldValue("module_id", null);
+            form.setFieldValue("matiere_id", null);
+            form.setFieldValue("vhoraire", 0);
+        }
+    }, [form.values.cycle_id]);
+
+    // Quand le module change → on réinitialise matière et VH
+    useEffect(() => {
+        if (form.values.module_id) {
+            form.setFieldValue("matiere_id", null);
+            form.setFieldValue("vhoraire", 0);
+        }
+    }, [form.values.module_id]);
+
+    // Quand la matière change → on met à jour automatiquement le VH
+    useEffect(() => {
+        if (selectedMatiere?.vhoraire) {
+            form.setFieldValue("vhoraire", selectedMatiere.vhoraire);
+        }
+    }, [selectedMatiere]);
+
+    // ============================================================
+    // 3. CALCULS DES MONTANTS (AFFICHÉS EN TEMPS RÉEL)
+    // ============================================================
+
+    const vhoraire = selectedMatiere?.vhoraire || 0;                           // Volume horaire de la matière
+    const nbClasseCycle = selectedCycle?.nb_classe || 1;                      // Nombre total de classes du cycle
+    const vhtDemande = (form.values.nb_classe || 1) * vhoraire;               // VHT = VH matière × nb classes demandé
+    const vhtTotal = vhoraire * nbClasseCycle;                                // VHT total disponible dans le cycle
+
+    // Cumul des VHT déjà utilisés pour cette matière ce mois-ci
     const cumulVHT = (vacations || [])
         .filter(v =>
             v.id !== editing?.id &&
@@ -70,22 +109,73 @@ export default function VacationFormModal({
         )
         .reduce((sum, v) => sum + (v.vht || 0), 0);
 
-    const vhtRestant = vhtTotal - cumulVHT;
+    const vhtRestant = vhtTotal - cumulVHT;                                   // VHT restant disponible
+    const isVHTExceeded = vhtRestant < vhtDemande;                            // Vérifie si on dépasse le quota
 
+    // Calculs financiers
     const taux = form.values.taux_horaire || 5000;
     const tauxRetenue = (form.values.taux_retenue || 2) / 100;
-
     const brut = vhtDemande * taux;
     const retenu = brut * tauxRetenue;
     const net = brut - retenu;
 
-    const isVHTExceeded = vhtRestant < vhtDemande;
+    // ============================================================
+    // 4. GESTION DES CHANGEMENTS DE FORMULAIRE
+    // ============================================================
 
-    const getVHTStatusColor = () => {
-        if (isVHTExceeded) return "red";
-        if (vhtRestant === 0) return "orange";
-        return "green";
+    const handleCycleChange = (cycleId: number | null) => {
+        form.setFieldValue("cycle_id", cycleId);
+        form.setFieldValue("module_id", null);
+        form.setFieldValue("matiere_id", null);
+        form.setFieldValue("vhoraire", 0);
     };
+
+    const handleModuleChange = (moduleId: number | null) => {
+        form.setFieldValue("module_id", moduleId);
+        form.setFieldValue("matiere_id", null);
+        form.setFieldValue("vhoraire", 0);
+    };
+
+    const handleMatiereChange = (matiereId: number | null) => {
+        const matiere = matieres.find(m => m.id === matiereId);
+        form.setFieldValue("matiere_id", matiereId);
+        if (matiere) {
+            form.setFieldValue("vhoraire", matiere.vhoraire || 0);
+        } else {
+            form.setFieldValue("vhoraire", 0);
+        }
+    };
+
+    // ============================================================
+    // 5. SOUMISSION DU FORMULAIRE
+    // ============================================================
+
+    // ============================================================
+    // 5. SOUMISSION DU FORMULAIRE - CORRIGÉ
+    // ============================================================
+
+    const handleSubmit = () => {
+        const payload = {
+            enseignant_id: form.values.enseignant_id,
+            matiere_id: form.values.matiere_id,
+            promotion_id: form.values.promotion_id,
+            annee_scolaire_id: Number(form.values.annee_scolaire),
+            nb_classe: form.values.nb_classe,
+            mois: Number(form.values.mois),
+            annee: form.values.annee,
+            taux_horaire: form.values.taux_horaire || 5000,
+            taux_retenue: form.values.taux_retenue || 2,
+            // AJOUTER ces champs pour le calcul
+            cycle_id: form.values.cycle_id,
+            module_id: form.values.module_id,
+        };
+        console.log("📤 Payload soumis:", payload);
+        onSubmit(payload);
+    };
+
+    // ============================================================
+    // 6. DONNÉES POUR LES SÉLECTEURS
+    // ============================================================
 
     const enseignantsData = (enseignants || [])
         .map(e => ({
@@ -110,7 +200,10 @@ export default function VacationFormModal({
         .filter(m => m.module_id === form.values.module_id)
         .map(m => ({
             value: String(m.id ?? 0),
-            label: m.designation || "Matière"
+            label: m.designation || "Matière",
+            vhoraire: m.vhoraire || 0,
+            coefficient: m.coefficient,
+            observation: m.observation
         }));
 
     const promotionsData = (promotions || []).map(p => ({
@@ -137,21 +230,15 @@ export default function VacationFormModal({
         return (value ?? 0).toLocaleString();
     };
 
-    // Fonction de soumission avec transformation backend
-    const handleSubmit = () => {
-        const payload = {
-            enseignant_id: form.values.enseignant_id,
-            matiere_id: form.values.matiere_id,
-            promotion_id: form.values.promotion_id,
-            annee_scolaire_id: Number(form.values.annee_scolaire),
-            nb_classe: form.values.nb_classe,
-            mois: Number(form.values.mois),
-            annee: form.values.annee,
-            taux_horaire: form.values.taux_horaire || 5000,
-            taux_retenue: form.values.taux_retenue || 2,
-        };
-        onSubmit(payload);
+    const getVHTStatusColor = () => {
+        if (isVHTExceeded) return "red";
+        if (vhtRestant === 0) return "orange";
+        return "green";
     };
+
+    // ============================================================
+    // 7. AFFICHAGE DU CHARGEMENT
+    // ============================================================
 
     if (isLoading) {
         return (
@@ -165,6 +252,10 @@ export default function VacationFormModal({
             </Modal>
         );
     }
+
+    // ============================================================
+    // 8. RENDU PRINCIPAL
+    // ============================================================
 
     return (
         <Modal
@@ -185,7 +276,9 @@ export default function VacationFormModal({
             padding="md"
         >
             <Stack gap="xs">
-                {/* Enseignant */}
+                {/* ================================================ */}
+                {/* SECTION 1 : ENSEIGNANT */}
+                {/* ================================================ */}
                 <Paper withBorder p="xs" radius="md" bg="gray.0">
                     <Group gap="xs" mb="xs">
                         <IconUser size={16} color="#228be6" />
@@ -209,7 +302,9 @@ export default function VacationFormModal({
                     )}
                 </Paper>
 
-                {/* Pédagogique */}
+                {/* ================================================ */}
+                {/* SECTION 2 : PÉDAGOGIQUE (Cycle → Module → Matière) */}
+                {/* ================================================ */}
                 <Paper withBorder p="xs" radius="md">
                     <Group gap="xs" mb="xs">
                         <IconBook size={16} color="#228be6" />
@@ -219,15 +314,10 @@ export default function VacationFormModal({
                         <Grid.Col span={6}>
                             <Select
                                 label="Cycle"
-                                placeholder="Cycle"
+                                placeholder="Sélectionner un cycle"
                                 data={cyclesData}
                                 value={form.values.cycle_id ? String(form.values.cycle_id) : null}
-                                onChange={(v) => {
-                                    const val = v ? Number(v) : 0;
-                                    form.setFieldValue("cycle_id", val);
-                                    form.setFieldValue("module_id", 0);
-                                    form.setFieldValue("matiere_id", 0);
-                                }}
+                                onChange={(v) => handleCycleChange(v ? Number(v) : null)}
                                 required
                                 radius="md"
                                 size="sm"
@@ -237,14 +327,10 @@ export default function VacationFormModal({
                         <Grid.Col span={6}>
                             <Select
                                 label="Module"
-                                placeholder="Module"
+                                placeholder="Sélectionner un module"
                                 data={modulesData}
                                 value={form.values.module_id ? String(form.values.module_id) : null}
-                                onChange={(v) => {
-                                    const val = v ? Number(v) : 0;
-                                    form.setFieldValue("module_id", val);
-                                    form.setFieldValue("matiere_id", 0);
-                                }}
+                                onChange={(v) => handleModuleChange(v ? Number(v) : null)}
                                 required
                                 radius="md"
                                 size="sm"
@@ -255,11 +341,12 @@ export default function VacationFormModal({
                         <Grid.Col span={6}>
                             <Select
                                 label="Matière"
-                                placeholder="Matière"
+                                placeholder="Sélectionner une matière"
                                 data={matieresData}
                                 value={form.values.matiere_id ? String(form.values.matiere_id) : null}
-                                onChange={(v) => form.setFieldValue("matiere_id", Number(v))}
+                                onChange={(v) => handleMatiereChange(v ? Number(v) : null)}
                                 searchable
+                                nothingFoundMessage="Aucune matière trouvée"
                                 required
                                 radius="md"
                                 size="sm"
@@ -268,9 +355,30 @@ export default function VacationFormModal({
                             />
                         </Grid.Col>
                         <Grid.Col span={6}>
+                            <Paper withBorder p="xs" radius="md" bg="blue.0">
+                                <Stack gap={0}>
+                                    <Text size="xs" c="dimmed" fw={500}>Volume horaire (VH) matière</Text>
+                                    <Group align="baseline" gap={5}>
+                                        <Text fw={700} size="xl" c="blue">{vhoraire}</Text>
+                                        <Text size="sm" c="dimmed">heures</Text>
+                                    </Group>
+                                    {selectedMatiere && (
+                                        <Text size="xs" c="dimmed" mt={5}>
+                                            {selectedMatiere.designation}
+                                        </Text>
+                                    )}
+                                    {!selectedMatiere && (
+                                        <Text size="xs" c="dimmed" mt={5}>
+                                            Aucune matière sélectionnée
+                                        </Text>
+                                    )}
+                                </Stack>
+                            </Paper>
+                        </Grid.Col>
+                        <Grid.Col span={6}>
                             <Select
                                 label="Promotion"
-                                placeholder="Promotion"
+                                placeholder="Sélectionner une promotion"
                                 data={promotionsData}
                                 value={form.values.promotion_id ? String(form.values.promotion_id) : null}
                                 onChange={(v) => form.setFieldValue("promotion_id", Number(v))}
@@ -288,10 +396,10 @@ export default function VacationFormModal({
                         </Grid.Col>
                         <Grid.Col span={6}>
                             <NumberInput
-                                label="Nb classes"
+                                label="Nombre de classes"
                                 placeholder="Classes"
-                                value={form.values.nb_classe || nbClasseCycle}
-                                onChange={(v) => form.setFieldValue("nb_classe", Number(v) || nbClasseCycle)}
+                                value={form.values.nb_classe || 1}
+                                onChange={(v) => form.setFieldValue("nb_classe", Number(v) || 1)}
                                 min={1}
                                 max={nbClasseCycle}
                                 radius="md"
@@ -300,9 +408,29 @@ export default function VacationFormModal({
                             />
                         </Grid.Col>
                     </Grid>
+
+                    {/* Informations supplémentaires sur la matière */}
+                    {selectedMatiere && (selectedMatiere.coefficient || selectedMatiere.observation) && (
+                        <SimpleGrid cols={2} spacing="xs" mt="xs">
+                            {selectedMatiere.coefficient && (
+                                <Card withBorder p="xs" bg="green.0" radius="md">
+                                    <Text size="xs" c="dimmed" ta="center">Coefficient</Text>
+                                    <Text fw={700} size="md" ta="center" c="green">{selectedMatiere.coefficient}</Text>
+                                </Card>
+                            )}
+                            {selectedMatiere.observation && (
+                                <Card withBorder p="xs" bg="orange.0" radius="md">
+                                    <Text size="xs" c="dimmed" ta="center">Observation</Text>
+                                    <Text size="xs" ta="center" c="dimmed" lineClamp={2}>{selectedMatiere.observation}</Text>
+                                </Card>
+                            )}
+                        </SimpleGrid>
+                    )}
                 </Paper>
 
-                {/* Cartes d'informations compactes */}
+                {/* ================================================ */}
+                {/* SECTION 3 : INDICATEURS DE VOLUME HORAIRE */}
+                {/* ================================================ */}
                 {selectedCycle && selectedMatiere && (
                     <SimpleGrid cols={4} spacing="xs">
                         <Card withBorder radius="md" p="4" bg="blue.0" style={{ padding: 6 }}>
@@ -336,7 +464,9 @@ export default function VacationFormModal({
                     </SimpleGrid>
                 )}
 
-                {/* Finance et période */}
+                {/* ================================================ */}
+                {/* SECTION 4 : FINANCE ET PÉRIODE */}
+                {/* ================================================ */}
                 <Paper withBorder p="xs" radius="md">
                     <Grid gutter="xs">
                         <Grid.Col span={6}>
@@ -414,13 +544,15 @@ export default function VacationFormModal({
                     </Grid>
                 </Paper>
 
-                {/* Résumé des montants */}
+                {/* ================================================ */}
+                {/* SECTION 5 : RÉSUMÉ DES MONTANTS */}
+                {/* ================================================ */}
                 {selectedMatiere && (
                     <Card withBorder radius="md" p="xs" bg="gray.0">
                         <Grid gutter="xs" align="center">
                             <Grid.Col span={3}>
                                 <Stack gap={2} align="center">
-                                    <Text size="10px" c="dimmed">VHT</Text>
+                                    <Text size="10px" c="dimmed">VHT demandé</Text>
                                     <Text fw={700} size="sm">{vhtDemande.toFixed(0)}h</Text>
                                 </Stack>
                             </Grid.Col>
@@ -432,27 +564,46 @@ export default function VacationFormModal({
                             </Grid.Col>
                             <Grid.Col span={3}>
                                 <Stack gap={2} align="center">
-                                    <Text size="10px" c="dimmed">Retenue</Text>
+                                    <Text size="10px" c="dimmed">Retenue ({form.values.taux_retenue || 2}%)</Text>
                                     <Text fw={700} size="sm">{formatNumber(retenu)} F</Text>
                                 </Stack>
                             </Grid.Col>
                             <Grid.Col span={3}>
                                 <Stack gap={2} align="center">
-                                    <Text size="10px" c="dimmed">Net</Text>
+                                    <Text size="10px" c="dimmed">Net à payer</Text>
                                     <Text fw={700} size="sm" c="green">{formatNumber(net)} F</Text>
                                 </Stack>
                             </Grid.Col>
                         </Grid>
 
+                        {/* Message d'alerte si dépassement du volume horaire */}
                         {isVHTExceeded && (
                             <Alert variant="light" color="red" icon={<IconAlertCircle size={12} />} p="4" mt="xs">
-                                <Text size="xs">Volume horaire insuffisant ! Restant: {Math.max(0, vhtRestant).toFixed(0)}h</Text>
+                                <Text size="xs">
+                                    ⚠️ Volume horaire insuffisant !
+                                    VHT demandé: {vhtDemande.toFixed(0)}h,
+                                    VHT restant: {Math.max(0, vhtRestant).toFixed(0)}h
+                                </Text>
+                            </Alert>
+                        )}
+
+                        {/* Message d'information si tout est ok */}
+                        {!isVHTExceeded && selectedMatiere && vhtRestant > 0 && (
+                            <Alert variant="light" color="green" icon={<IconInfoCircle size={12} />} p="4" mt="xs">
+                                <Text size="xs">
+                                    ✅ Volume horaire suffisant.
+                                    Il reste {Math.max(0, vhtRestant).toFixed(0)}h disponibles sur le cycle.
+                                </Text>
                             </Alert>
                         )}
                     </Card>
                 )}
 
-                {/* Bouton Calculer */}
+                {/* ================================================ */}
+                {/* SECTION 6 : BOUTONS D'ACTION */}
+                {/* ================================================ */}
+
+                {/* Bouton "Calculer les montants" - Optionnel, les calculs sont déjà en temps réel */}
                 {onCalculate && (
                     <Button
                         variant="light"
@@ -463,11 +614,11 @@ export default function VacationFormModal({
                         radius="md"
                         size="sm"
                     >
-                        Calculer les montants
+                        Vérifier la vacation
                     </Button>
                 )}
 
-                {/* Résultats du calcul sécurisé */}
+                {/* Résultats du calcul sécurisé (si fourni par le parent) */}
                 {calculatedValues && (
                     <Paper withBorder p="xs" radius="md" bg={calculatedValues.global_ok ? "green.0" : "red.0"}>
                         <Stack gap={4}>
@@ -486,12 +637,16 @@ export default function VacationFormModal({
                     </Paper>
                 )}
 
-                {/* Boutons */}
+                {/* Bouton d'enregistrement - Désactivé si VHT insuffisant */}
                 <Group justify="flex-end" mt="xs">
                     <Button variant="light" onClick={onClose} radius="md" size="sm">
                         Annuler
                     </Button>
-                    <Tooltip label={isVHTExceeded ? "Volume horaire insuffisant" : "Enregistrer"}>
+                    <Tooltip label={
+                        !form.values.matiere_id ? "Veuillez sélectionner une matière" :
+                            isVHTExceeded ? `Volume horaire insuffisant (demande: ${vhtDemande}h, restant: ${Math.max(0, vhtRestant)}h)` :
+                                "Enregistrer la vacation"
+                    }>
                         <Button
                             onClick={handleSubmit}
                             disabled={isVHTExceeded || !form.values.enseignant_id || !form.values.matiere_id || !form.values.promotion_id || !form.values.annee_scolaire || isLoading}
@@ -505,6 +660,12 @@ export default function VacationFormModal({
                         </Button>
                     </Tooltip>
                 </Group>
+
+                {/* Message explicatif du flux de travail */}
+                <Text size="xs" c="dimmed" ta="center" mt="xs">
+                    💡 Les montants sont calculés automatiquement.
+                    Le bouton "Enregistrer" n'est actif que si le volume horaire est suffisant.
+                </Text>
             </Stack>
         </Modal>
     );
