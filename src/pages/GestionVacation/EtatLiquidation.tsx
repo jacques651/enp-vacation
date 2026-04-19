@@ -1,38 +1,36 @@
-import { Table, Paper, Text, Container, Loader, Alert } from '@mantine/core';
+import { Table, Paper, Text, Container, Loader, Alert, Group, Stack, Title, Divider } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 
 type Props = {
   mois: number;
   annee: number;
-  enseignantId?: number;  // ← Note: enseignant_id, pas promotionId
+  enseignantId?: number;
 };
 
-// ================= TYPES =================
+// ================= TYPES (ALIGNÉS AVEC LA BASE) =================
 interface LiquidationRow {
-  id: number;
+  numero_ordre: number;
   nom: string;
   prenom: string;
   titre: string;
   statut: string;
-  cycle_designation: string;
-  module_designation: string;
-  matiere_designation: string;
-  banque_designation: string | null;
-  numero_compte: string | null;
-  cle_rib: string | null;
-  vhoraire_matiere: number;
+  cycle: string;
+  module: string;
+  matiere: string;
+  banque: string | null;
+  vhoraire: number;
   nb_classe: number;
+  vht: number;
   taux_horaire: number;
   taux_retenue: number;
-  vht: number;
   montant_brut: number;
   montant_retenu: number;
   montant_net: number;
-  mois: string;
+  mois: number;  // ✅ CORRIGÉ : number au lieu de string
   annee: number;
   annee_scolaire: string;
-  promotion_libelle: string | null;
+  promotion: string;
 }
 
 interface Entete {
@@ -45,15 +43,10 @@ interface Signataire {
   id: number;
   nom: string;
   prenom: string;
-  grade: string | null;
-  fonction: string | null;
-  titre_honorifique: string | null;
-}
-
-interface Promotion {
-  id: number;
-  libelle: string;
-  annee_scolaire: string | null;
+  fonction: string;
+  titre: string;
+  ordre_signature: number;
+  actif: number;
 }
 
 export default function EtatLiquidation({ mois, annee, enseignantId }: Props) {
@@ -63,25 +56,20 @@ export default function EtatLiquidation({ mois, annee, enseignantId }: Props) {
     queryKey: ['etat_liquidation', mois, annee, enseignantId],
     queryFn: () =>
       invoke<LiquidationRow[]>('get_etat_liquidation', {
-        mois: mois.toString().padStart(2, '0'),
-        annee,
+        mois: Number(mois),  // ✅ CORRIGÉ : envoie un nombre, pas une string
+        annee: Number(annee),  // ✅ CORRIGÉ : envoie un nombre aussi
         enseignant_id: enseignantId,
       }),
   });
 
   const { data: entetes = [], isLoading: entetesLoading } = useQuery({
-    queryKey: ['entete'],
-    queryFn: () => invoke<Entete[]>('get_entete'),
+    queryKey: ['entetes'],
+    queryFn: () => invoke<Entete[]>('get_entetes'),
   });
 
   const { data: signataires = [], isLoading: signatairesLoading } = useQuery({
     queryKey: ['signataires'],
     queryFn: () => invoke<Signataire[]>('get_signataires'),
-  });
-
-  const { isLoading: promotionsLoading } = useQuery({
-    queryKey: ['promotions'],
-    queryFn: () => invoke<Promotion[]>('get_promotions'),
   });
 
   // ================= HELPERS =================
@@ -91,11 +79,7 @@ export default function EtatLiquidation({ mois, annee, enseignantId }: Props) {
   const format = (value?: number | null) =>
     (value ?? 0).toLocaleString('fr-FR');
 
-  const percent = (n: number) => (n * 100).toFixed(0) + ' %';
-
   const today = new Date().toLocaleDateString('fr-FR');
-
-  // Extraire l'année de début de l'année scolaire (ex: "2025-2026" → "2025")
 
   // Normaliser pour la recherche
   const normalize = (s: string | null) =>
@@ -104,14 +88,15 @@ export default function EtatLiquidation({ mois, annee, enseignantId }: Props) {
   // Trouver le DAF (responsable finances)
   const daf = signataires.find((s) =>
     normalize(s.fonction).includes('finances') ||
-    normalize(s.fonction).includes('financier')
+    normalize(s.fonction).includes('financier') ||
+    normalize(s.fonction).includes('comptable')
   );
 
   // Trouver le DG (Directeur Général)
   const dg = signataires.find((s) =>
     normalize(s.fonction).includes('directeur') &&
     (normalize(s.fonction).includes('general') || normalize(s.fonction).includes('generale'))
-  );
+  ) || signataires.find((s) => s.ordre_signature === 1);
 
   // ================= TOTAUX =================
   const total = rows.reduce(
@@ -125,7 +110,7 @@ export default function EtatLiquidation({ mois, annee, enseignantId }: Props) {
   );
 
   // ================= AFFICHAGE CHARGEMENT =================
-  if (rowsLoading || entetesLoading || signatairesLoading || promotionsLoading) {
+  if (rowsLoading || entetesLoading || signatairesLoading) {
     return (
       <Container size="xl">
         <Paper p="xl" withBorder style={{ textAlign: 'center' }}>
@@ -148,121 +133,130 @@ export default function EtatLiquidation({ mois, annee, enseignantId }: Props) {
 
   // ================= RENDU =================
   return (
-    <Container size="xl">
-      <Paper p="md" withBorder>
-
+    <Container size="xl" py="md">
+      <Paper p="xl" withBorder>
         {/* ================= ENTETE ================= */}
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <div>
-            <Text fw={700}>{getEntete('ministere')}</Text>
-            <Text>{getEntete('ecole')}</Text>
-            <Text mt="sm">{getEntete('numero') || 'N° ORDRE'}</Text>
-          </div>
+        <Group justify="space-between" align="flex-start" mb="lg">
+          <Stack gap={2}>
+            <Text fw={700} size="sm">{getEntete('nom_etablissement') || 'ECOLE NATIONALE DE POLICE'}</Text>
+            {getEntete('sigle') && <Text size="sm" c="dimmed">{getEntete('sigle')}</Text>}
+            {getEntete('adresse') && <Text size="xs" c="dimmed">{getEntete('adresse')}</Text>}
+          </Stack>
 
-          <div style={{ textAlign: 'right' }}>
-            <Text mt="xl">
-              {getEntete('lieudate') || 'Bamako, le'} {today}
+          <Stack gap={2} align="flex-end">
+            <Text size="sm">
+              {getEntete('lieudate') || 'Ouagadougou, le'} {today}
             </Text>
-          </div>
-        </div>
+          </Stack>
+        </Group>
+
+        <Divider my="md" />
 
         {/* ================= TITRE ================= */}
-        <div style={{ textAlign: 'center', marginTop: 20 }}>
-          <Text fw={700} tt="uppercase" size="lg">
+        <Stack align="center" gap="xs" mb="lg">
+          <Title order={2} tt="uppercase" ta="center">
             ETAT DE LIQUIDATION DES FRAIS DE VACATION
-          </Text>
+          </Title>
 
-          <Text fw={700} size="md" mt="md">
-            MOIS {mois.toString().padStart(2, '0')} / {annee}
-          </Text>
+          <Title order={4} ta="center" c="blue">
+            MOIS {mois.toString().padStart(2, '0')} / {annee}  {/* ✅ Affichage formaté */}
+          </Title>
 
           {rows[0] && (
-            <Text fw={700} size="sm" c="dimmed">
+            <Text size="sm" c="dimmed">
               Année scolaire: {rows[0].annee_scolaire}
             </Text>
           )}
-        </div>
+        </Stack>
 
         {/* ================= TABLE ================= */}
-        <Table mt="md" withColumnBorders withTableBorder striped highlightOnHover>
-          <thead>
-            <tr style={{ backgroundColor: '#f5f5f5' }}>
-              <th style={{ textAlign: 'center' }}>N°</th>
-              <th>Nom Prénom</th>
-              <th>Cycle</th>
-              <th>Module</th>
-              <th>Matière</th>
-              <th style={{ textAlign: 'right' }}>VH</th>
-              <th style={{ textAlign: 'right' }}>NB</th>
-              <th style={{ textAlign: 'right' }}>Taux</th>
-              <th style={{ textAlign: 'right' }}>Retenue</th>
-              <th style={{ textAlign: 'right' }}>Brut</th>
-              <th style={{ textAlign: 'right' }}>Net</th>
-            </tr>
-          </thead>
+        {rows.length === 0 ? (
+          <Alert title="Aucune donnée" color="blue" variant="light">
+            Aucune vacation trouvée pour la période sélectionnée.
+          </Alert>
+        ) : (
+          <>
+            <Table withColumnBorders withTableBorder striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr style={{ backgroundColor: '#f5f5f5' }}>
+                  <Table.Th style={{ textAlign: 'center', width: 50 }}>N°</Table.Th>
+                  <Table.Th>Enseignant</Table.Th>
+                  <Table.Th>Promotion</Table.Th>
+                  <Table.Th>Cycle</Table.Th>
+                  <Table.Th>Module</Table.Th>
+                  <Table.Th>Matière</Table.Th>
+                  <Table.Th style={{ textAlign: 'right' }}>VH</Table.Th>
+                  <Table.Th style={{ textAlign: 'right' }}>NB Cl.</Table.Th>
+                  <Table.Th style={{ textAlign: 'right' }}>VHT</Table.Th>
+                  <Table.Th style={{ textAlign: 'right' }}>Taux H.</Table.Th>
+                  <Table.Th style={{ textAlign: 'right' }}>Brut</Table.Th>
+                  <Table.Th style={{ textAlign: 'right' }}>Retenue</Table.Th>
+                  <Table.Th style={{ textAlign: 'right' }}>Net</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {rows.map((v, i) => (
+                  <Table.Tr key={i}>
+                    <Table.Td style={{ textAlign: 'center' }}>{i + 1}</Table.Td>
+                    <Table.Td>
+                      <Text fw={500}>{v.nom} {v.prenom}</Text>
+                      <Text size="xs" c="dimmed">{v.titre} ({v.statut})</Text>
+                    </Table.Td>
+                    <Table.Td>{v.promotion}</Table.Td>
+                    <Table.Td>{v.cycle}</Table.Td>
+                    <Table.Td>{v.module}</Table.Td>
+                    <Table.Td>{v.matiere}</Table.Td>
+                    <Table.Td style={{ textAlign: 'right' }}>{v.vhoraire}</Table.Td>
+                    <Table.Td style={{ textAlign: 'right' }}>{v.nb_classe}</Table.Td>
+                    <Table.Td style={{ textAlign: 'right' }}>{v.vht}</Table.Td>
+                    <Table.Td style={{ textAlign: 'right' }}>{format(v.taux_horaire)}</Table.Td>
+                    <Table.Td style={{ textAlign: 'right' }}>{format(v.montant_brut)}</Table.Td>
+                    <Table.Td style={{ textAlign: 'right' }}>{format(v.montant_retenu)}</Table.Td>
+                    <Table.Td style={{ textAlign: 'right', fontWeight: 'bold' }}>
+                      {format(v.montant_net)}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
 
-          <tbody>
-            {rows.map((v, i) => (
-              <tr key={v.id}>
-                <td style={{ textAlign: 'center' }}>{i + 1}</td>
-                <td>{v.nom} {v.prenom}</td>
-                <td>{v.cycle_designation}</td>
-                <td>{v.module_designation}</td>
-                <td>{v.matiere_designation}</td>
-                <td style={{ textAlign: 'right' }}>{v.vhoraire_matiere}</td>
-                <td style={{ textAlign: 'right' }}>{v.nb_classe}</td>
-                <td style={{ textAlign: 'right' }}>{format(v.taux_horaire)}</td>
-                <td style={{ textAlign: 'right' }}>{percent(v.taux_retenue)}</td>
-                <td style={{ textAlign: 'right' }}>{format(v.montant_brut)}</td>
-                <td style={{ textAlign: 'right', fontWeight: 'bold' }}>
-                  {format(v.montant_net)}
-                </td>
-              </tr>
-            ))}
+                {/* Ligne de total */}
+                <Table.Tr style={{ fontWeight: 'bold', backgroundColor: '#f0f0f0' }}>
+                  <Table.Td colSpan={7} style={{ textAlign: 'right' }}>
+                    TOTAL GÉNÉRAL
+                  </Table.Td>
+                  <Table.Td style={{ textAlign: 'right' }}>{total.nb}</Table.Td>
+                  <Table.Td colSpan={2}></Table.Td>
+                  <Table.Td style={{ textAlign: 'right' }}>{format(total.brut)}</Table.Td>
+                  <Table.Td style={{ textAlign: 'right' }}>{format(total.retenu)}</Table.Td>
+                  <Table.Td style={{ textAlign: 'right' }}>{format(total.net)}</Table.Td>
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
 
-            {/* Ligne de total */}
-            <tr style={{ fontWeight: 'bold', backgroundColor: '#f0f0f0' }}>
-              <td colSpan={5}>TOTAL GÉNÉRAL</td>
-              <td style={{ textAlign: 'right' }}></td>
-              <td style={{ textAlign: 'right' }}>{total.nb}</td>
-              <td style={{ textAlign: 'right' }}></td>
-              <td style={{ textAlign: 'right' }}></td>
-              <td style={{ textAlign: 'right' }}>{format(total.brut)}</td>
-              <td style={{ textAlign: 'right' }}>{format(total.net)}</td>
-            </tr>
-          </tbody>
-        </Table>
-
-        {/* ================= TEXTE ================= */}
-        <Text mt="md" fw={600}>
-          Arrêté le présent état à la somme de : <strong>{format(total.net)} FCFA</strong>
-        </Text>
-
-        {/* ================= SIGNATURES ================= */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 60 }}>
-          <div style={{ textAlign: 'center', flex: 1 }}>
-            <Text>{daf?.fonction || '_________________'}</Text>
-            <Text mt="xl" fw={700}>
-              {daf ? `${daf.prenom} ${daf.nom}` : '_________________'}
+            {/* ================= TEXTE ================= */}
+            <Text mt="md" fw={600}>
+              Arrêté le présent état à la somme de : <strong>{format(total.net)} FCFA</strong>
             </Text>
-            <Text>{daf?.grade || ''}</Text>
-            {daf?.titre_honorifique && (
-              <Text size="sm" c="dimmed" mt="xs">{daf.titre_honorifique}</Text>
-            )}
-          </div>
 
-          <div style={{ textAlign: 'center', flex: 1 }}>
-            <Text>{dg?.fonction || '_________________'}</Text>
-            <Text mt="xl" fw={700}>
-              {dg ? `${dg.prenom} ${dg.nom}` : '_________________'}
-            </Text>
-            <Text>{dg?.grade || ''}</Text>
-            {dg?.titre_honorifique && (
-              <Text size="sm" c="dimmed" mt="xs">{dg.titre_honorifique}</Text>
-            )}
-          </div>
-        </div>
+            {/* ================= SIGNATURES ================= */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 60 }}>
+              <div style={{ textAlign: 'center', flex: 1 }}>
+                <Text>{daf?.fonction || 'Le Comptable'}</Text>
+                <Text mt="xl" fw={700}>
+                  {daf ? `${daf.prenom} ${daf.nom}` : '_________________'}
+                </Text>
+                <Text>{daf?.titre || ''}</Text>
+              </div>
 
+              <div style={{ textAlign: 'center', flex: 1 }}>
+                <Text>{dg?.fonction || 'Le Directeur Général'}</Text>
+                <Text mt="xl" fw={700}>
+                  {dg ? `${dg.prenom} ${dg.nom}` : '_________________'}
+                </Text>
+                <Text>{dg?.titre || ''}</Text>
+              </div>
+            </div>
+          </>
+        )}
       </Paper>
     </Container>
   );

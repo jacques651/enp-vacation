@@ -59,9 +59,7 @@ function App() {
               <Route path="/annees-scolaires" element={<AnneesScolairesManager />} />
               <Route path="/promotions" element={<PromotionsManager />} />
               <Route path="/comptes-bancaires" element={<ComptesBancairesManager />} />
-              <Route path="/entete" element={<EnteteManager />} /> {/* Nouvelle route pour l'entête */}
               <Route path="/import" element={<ImportExcel />} />
-              
               {/* Rapports */}
               <Route path="/cumuls" element={<div>Cumuls annuels (à venir)</div>} />
               

@@ -138,12 +138,6 @@ export default function Navbar() {
           path="/referents"
           icon={<IconDatabase size={18} />}
         />
-        <NavItem
-          label="Configuration en-tête"
-          path="/entete-config"
-          icon={<IconSettings size={18} />}
-        />
-
         {/* FINANCES */}
         <SectionTitle label="FINANCES" />
 
