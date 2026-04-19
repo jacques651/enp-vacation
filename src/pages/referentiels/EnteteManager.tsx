@@ -17,6 +17,12 @@ import {
   Loader,
   ThemeIcon,
   Image,
+  Table,
+  Badge,
+  ActionIcon,
+  Modal,
+  ScrollArea,
+  Pagination,
 } from '@mantine/core';
 import { 
   IconSettings, 
@@ -31,11 +37,15 @@ import {
   IconMail,
   IconPhone,
   IconTableImport,
+  IconEdit,
+  IconPlus,
+  IconEye,
+  IconEyeOff,
 } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 interface Entete {
   id: number;
@@ -43,12 +53,23 @@ interface Entete {
   valeur: string | null;
 }
 
+interface CreateEntete {
+  cle: string;
+  valeur: string | null;
+}
+
 export default function EnteteManager() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<string>('informations');
+  const [activeTab, setActiveTab] = useState<string>('liste');
   const [uploading, setUploading] = useState(false);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [modalOpened, setModalOpened] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Récupérer toutes les entêtes
   const { data: entetes = [], isLoading, refetch } = useQuery({
@@ -68,7 +89,132 @@ export default function EnteteManager() {
     },
   });
 
-  // Formulaire informations générales
+  // Formulaire pour créer/modifier
+  const enteteForm = useForm({
+    initialValues: {
+      cle: '',
+      valeur: '',
+    },
+    validate: {
+      cle: (value) => (!value ? 'La clé est obligatoire' : null),
+    },
+  });
+
+  // Filtrer les entêtes
+  const filteredData = entetes.filter(entete =>
+    entete.cle.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (entete.valeur && entete.valeur.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
+
+  // Pagination
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  const paginatedData = filteredData.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  // CRUD Mutations
+  const createMutation = useMutation({
+    mutationFn: async (data: CreateEntete) => {
+      return await invoke('create_entete', { data });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['entetes'] });
+      setModalOpened(false);
+      resetForm();
+      notifications.show({
+        title: 'Succès',
+        message: 'Paramètre créé avec succès',
+        color: 'green',
+      });
+    },
+    onError: (error: any) => {
+      notifications.show({
+        title: 'Erreur',
+        message: error.toString(),
+        color: 'red',
+      });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: CreateEntete }) => {
+      return await invoke('update_entete', { id, data });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['entetes'] });
+      setModalOpened(false);
+      resetForm();
+      notifications.show({
+        title: 'Succès',
+        message: 'Paramètre mis à jour avec succès',
+        color: 'green',
+      });
+    },
+    onError: (error: any) => {
+      notifications.show({
+        title: 'Erreur',
+        message: error.toString(),
+        color: 'red',
+      });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return await invoke('delete_entete', { id });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['entetes'] });
+      setDeleteId(null);
+      notifications.show({
+        title: 'Succès',
+        message: 'Paramètre supprimé avec succès',
+        color: 'green',
+      });
+    },
+    onError: (error: any) => {
+      notifications.show({
+        title: 'Erreur',
+        message: error.toString(),
+        color: 'red',
+      });
+    },
+  });
+
+  const resetForm = () => {
+    setEditingId(null);
+    enteteForm.reset();
+  };
+
+  const openCreateModal = () => {
+    resetForm();
+    setModalOpened(true);
+  };
+
+  const openEditModal = (item: Entete) => {
+    setEditingId(item.id);
+    enteteForm.setValues({
+      cle: item.cle,
+      valeur: item.valeur || '',
+    });
+    setModalOpened(true);
+  };
+
+  const handleSubmit = () => {
+    const submitData = {
+      cle: enteteForm.values.cle.trim(),
+      valeur: enteteForm.values.valeur.trim() || null,
+    };
+
+    if (editingId) {
+      updateMutation.mutate({ id: editingId, data: submitData });
+    } else {
+      createMutation.mutate(submitData);
+    }
+  };
+
+  // Formulaires pré-configurés
   const infoForm = useForm({
     initialValues: {
       nom_etablissement: '',
@@ -79,7 +225,6 @@ export default function EnteteManager() {
     },
   });
 
-  // Formulaire direction
   const directionForm = useForm({
     initialValues: {
       directeur_nom: '',
@@ -88,7 +233,6 @@ export default function EnteteManager() {
     },
   });
 
-  // Formulaire comptabilité
   const comptabiliteForm = useForm({
     initialValues: {
       comptable_nom: '',
@@ -97,7 +241,6 @@ export default function EnteteManager() {
     },
   });
 
-  // Formulaire autres paramètres
   const autresForm = useForm({
     initialValues: {
       signataire_defaut: '',
@@ -160,7 +303,7 @@ export default function EnteteManager() {
     
     if (success) {
       notifications.show({ title: 'Succès', message: 'Informations mises à jour', color: 'green' });
-      refetch();
+      queryClient.invalidateQueries({ queryKey: ['entetes'] });
     } else {
       notifications.show({ title: 'Erreur', message: 'Erreur lors de la sauvegarde', color: 'red' });
     }
@@ -178,7 +321,7 @@ export default function EnteteManager() {
     
     if (success) {
       notifications.show({ title: 'Succès', message: 'Informations direction mises à jour', color: 'green' });
-      refetch();
+      queryClient.invalidateQueries({ queryKey: ['entetes'] });
     } else {
       notifications.show({ title: 'Erreur', message: 'Erreur lors de la sauvegarde', color: 'red' });
     }
@@ -196,7 +339,7 @@ export default function EnteteManager() {
     
     if (success) {
       notifications.show({ title: 'Succès', message: 'Informations comptabilité mises à jour', color: 'green' });
-      refetch();
+      queryClient.invalidateQueries({ queryKey: ['entetes'] });
     } else {
       notifications.show({ title: 'Erreur', message: 'Erreur lors de la sauvegarde', color: 'red' });
     }
@@ -214,7 +357,7 @@ export default function EnteteManager() {
     
     if (success) {
       notifications.show({ title: 'Succès', message: 'Paramètres mis à jour', color: 'green' });
-      refetch();
+      queryClient.invalidateQueries({ queryKey: ['entetes'] });
     } else {
       notifications.show({ title: 'Erreur', message: 'Erreur lors de la sauvegarde', color: 'red' });
     }
@@ -235,7 +378,7 @@ export default function EnteteManager() {
         await invoke('upload_logo_base64', { logoBase64: base64 });
         notifications.show({ title: 'Succès', message: 'Logo uploadé avec succès', color: 'green' });
         queryClient.invalidateQueries({ queryKey: ['logo'] });
-        refetch();
+        queryClient.invalidateQueries({ queryKey: ['entetes'] });
       } catch (error: any) {
         notifications.show({ title: 'Erreur', message: error.toString(), color: 'red' });
       } finally {
@@ -251,7 +394,7 @@ export default function EnteteManager() {
       setLogoPreview(null);
       notifications.show({ title: 'Succès', message: 'Logo supprimé', color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['logo'] });
-      refetch();
+      queryClient.invalidateQueries({ queryKey: ['entetes'] });
     } catch (error: any) {
       notifications.show({ title: 'Erreur', message: error.toString(), color: 'red' });
     }
@@ -267,7 +410,7 @@ export default function EnteteManager() {
 
   return (
     <Stack p="md" gap="lg">
-      {/* Header - Même style que ImportExcel */}
+      {/* Header */}
       <Card withBorder radius="md" p="lg" bg="adminBlue.8">
         <Group justify="space-between">
           <Stack gap={2}>
@@ -282,9 +425,12 @@ export default function EnteteManager() {
         </Group>
       </Card>
 
-      {/* Tabs - Même style que ImportExcel */}
+      {/* Tabs */}
       <Tabs value={activeTab} onChange={(value) => setActiveTab(value as string)}>
         <Tabs.List grow>
+          <Tabs.Tab value="liste" leftSection={<IconSettings size={16} />}>
+            Liste des paramètres
+          </Tabs.Tab>
           <Tabs.Tab value="informations" leftSection={<IconBuilding size={16} />}>
             Informations
           </Tabs.Tab>
@@ -303,7 +449,116 @@ export default function EnteteManager() {
         </Tabs.List>
       </Tabs>
 
-      {/* Onglet Informations */}
+      {/* Onglet Liste des paramètres (NOUVEAU) */}
+      <Tabs.Panel value="liste">
+        <Card withBorder radius="md" p="lg">
+          <Stack gap="md">
+            <Group justify="space-between" align="flex-end">
+              <div>
+                <Title order={4}>Tous les paramètres</Title>
+                <Text size="sm" c="dimmed">
+                  Gérez tous les paramètres de l'application
+                </Text>
+              </div>
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={openCreateModal}
+                variant="gradient"
+                gradient={{ from: 'blue', to: 'cyan' }}
+              >
+                Ajouter un paramètre
+              </Button>
+            </Group>
+
+            <Divider />
+
+            {/* Recherche */}
+            <TextInput
+              placeholder="Rechercher par clé ou valeur..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+            />
+
+            {/* Tableau */}
+            {filteredData.length === 0 ? (
+              <Alert icon={<IconAlertCircle size={16} />} color="blue" variant="light">
+                Aucun paramètre trouvé. Cliquez sur "Ajouter" pour commencer.
+              </Alert>
+            ) : (
+              <>
+                <ScrollArea style={{ maxHeight: 500 }}>
+                  <Table striped highlightOnHover>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>ID</Table.Th>
+                        <Table.Th>Clé</Table.Th>
+                        <Table.Th>Valeur</Table.Th>
+                        <Table.Th style={{ width: 100, textAlign: 'center' }}>Actions</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {paginatedData.map((item) => (
+                        <Table.Tr key={item.id}>
+                          <Table.Td>
+                            <Badge color="gray" variant="light" size="sm">
+                              {item.id}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge color="blue" variant="light" size="sm">
+                              {item.cle}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="sm" lineClamp={2}>
+                              {item.valeur || <Text span c="dimmed">(vide)</Text>}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap="xs" justify="center">
+                              <ActionIcon
+                                variant="subtle"
+                                color="blue"
+                                onClick={() => openEditModal(item)}
+                              >
+                                <IconEdit size={16} />
+                              </ActionIcon>
+                              <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                onClick={() => setDeleteId(item.id)}
+                              >
+                                <IconTrash size={16} />
+                              </ActionIcon>
+                            </Group>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <Group justify="center" mt="md">
+                    <Pagination
+                      value={currentPage}
+                      onChange={setCurrentPage}
+                      total={totalPages}
+                      color="blue"
+                    />
+                  </Group>
+                )}
+              </>
+            )}
+          </Stack>
+        </Card>
+      </Tabs.Panel>
+
+      {/* Onglet Informations (inchangé) */}
       <Tabs.Panel value="informations">
         <Card withBorder radius="md" p="lg">
           <Stack gap="md">
@@ -371,7 +626,7 @@ export default function EnteteManager() {
         </Card>
       </Tabs.Panel>
 
-      {/* Onglet Logo */}
+      {/* Onglet Logo (inchangé) */}
       <Tabs.Panel value="logo">
         <Card withBorder radius="md" p="lg">
           <Stack gap="md">
@@ -441,7 +696,7 @@ export default function EnteteManager() {
         </Card>
       </Tabs.Panel>
 
-      {/* Onglet Direction */}
+      {/* Onglet Direction (inchangé) */}
       <Tabs.Panel value="direction">
         <Card withBorder radius="md" p="lg">
           <Stack gap="md">
@@ -491,7 +746,7 @@ export default function EnteteManager() {
         </Card>
       </Tabs.Panel>
 
-      {/* Onglet Comptabilité */}
+      {/* Onglet Comptabilité (inchangé) */}
       <Tabs.Panel value="comptabilite">
         <Card withBorder radius="md" p="lg">
           <Stack gap="md">
@@ -541,7 +796,7 @@ export default function EnteteManager() {
         </Card>
       </Tabs.Panel>
 
-      {/* Onglet Autres */}
+      {/* Onglet Autres (inchangé) */}
       <Tabs.Panel value="autres">
         <Card withBorder radius="md" p="lg">
           <Stack gap="md">
@@ -587,6 +842,76 @@ export default function EnteteManager() {
         </Card>
       </Tabs.Panel>
 
+      {/* Modal CRUD */}
+      <Modal
+        opened={modalOpened}
+        onClose={() => {
+          setModalOpened(false);
+          resetForm();
+        }}
+        title={editingId ? "Modifier le paramètre" : "Ajouter un paramètre"}
+        size="md"
+      >
+        <form onSubmit={enteteForm.onSubmit(handleSubmit)}>
+          <Stack gap="md">
+            <TextInput
+              label="Clé"
+              placeholder="ex: nom_etablissement"
+              description="Identifiant unique du paramètre"
+              withAsterisk
+              disabled={!!editingId}
+              {...enteteForm.getInputProps('cle')}
+            />
+            
+            <Textarea
+              label="Valeur"
+              placeholder="Valeur du paramètre"
+              rows={4}
+              {...enteteForm.getInputProps('valeur')}
+            />
+            
+            <Group justify="flex-end" mt="md">
+              <Button variant="light" onClick={() => setModalOpened(false)}>
+                Annuler
+              </Button>
+              <Button
+                type="submit"
+                loading={createMutation.isPending || updateMutation.isPending}
+                variant="gradient"
+                gradient={{ from: 'blue', to: 'cyan' }}
+              >
+                {editingId ? 'Mettre à jour' : 'Ajouter'}
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Modal>
+
+      {/* Modal confirmation suppression */}
+      <Modal
+        opened={deleteId !== null}
+        onClose={() => setDeleteId(null)}
+        title="Confirmation"
+        centered
+      >
+        <Stack>
+          <Text>Êtes-vous sûr de vouloir supprimer ce paramètre ?</Text>
+          <Text size="sm" c="dimmed">Cette action est irréversible.</Text>
+          <Group justify="flex-end" mt="md">
+            <Button variant="light" onClick={() => setDeleteId(null)}>
+              Annuler
+            </Button>
+            <Button
+              color="red"
+              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
+              loading={deleteMutation.isPending}
+            >
+              Supprimer
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
       {/* Section Aperçu */}
       <Card withBorder radius="md" p="lg">
         <Title order={5} mb="md">📋 Aperçu de l'en-tête</Title>
@@ -613,13 +938,13 @@ export default function EnteteManager() {
         </Paper>
       </Card>
 
-      {/* Instructions - Même style que ImportExcel */}
+      {/* Instructions */}
       <Card withBorder radius="md" p="lg">
         <Title order={5} mb="md">📋 Instructions</Title>
         <Stack gap="xs">
-          <Text size="sm">1. Remplissez les informations de l'établissement dans l'onglet "Informations"</Text>
-          <Text size="sm">2. Importez le logo dans l'onglet "Logo" (format PNG ou JPG)</Text>
-          <Text size="sm">3. Renseignez les responsables dans les onglets "Direction" et "Comptabilité"</Text>
+          <Text size="sm">1. Utilisez l'onglet "Liste des paramètres" pour voir, ajouter, modifier ou supprimer des paramètres</Text>
+          <Text size="sm">2. Les onglets "Informations", "Direction", "Comptabilité" et "Autres" sont des raccourcis vers les paramètres courants</Text>
+          <Text size="sm">3. Importez le logo dans l'onglet "Logo" (format PNG ou JPG)</Text>
           <Text size="sm">4. Les modifications sont automatiquement enregistrées</Text>
           <Text size="sm">5. L'aperçu en bas montre le rendu sur les documents officiels</Text>
         </Stack>
@@ -632,6 +957,7 @@ export default function EnteteManager() {
           <Text size="sm">• Les informations de direction sont utilisées pour les signatures officielles</Text>
           <Text size="sm">• Le signataire par défaut sera pré-sélectionné dans les documents</Text>
           <Text size="sm">• La version du document permet de suivre les mises à jour des templates</Text>
+          <Text size="sm">• Vous pouvez ajouter n'importe quel paramètre personnalisé via l'onglet "Liste"</Text>
         </Stack>
       </Card>
     </Stack>

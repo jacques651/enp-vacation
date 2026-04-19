@@ -19,8 +19,10 @@ import {
   Pagination,
   NumberInput,
   Switch,
+  Checkbox,
+  Flex,
 } from '@mantine/core';
-import { IconSignature, IconCheck, IconAlertCircle, IconEdit, IconTrash, IconPlus, IconSearch, IconTableImport } from '@tabler/icons-react';
+import { IconSignature, IconCheck, IconAlertCircle, IconEdit, IconTrash, IconPlus, IconSearch, IconTableImport, IconTrashX } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -29,9 +31,9 @@ interface Signataire {
   id: number;
   nom: string;
   prenom: string;
-  grade: string | null;  // AJOUTÉ : grade peut être null
+  grade: string | null;
   fonction: string;
-  titre: string;
+  titre: string | null;  // Changé: peut être null
   ordre_signature: number;
   actif: number;
   created_at: string;
@@ -41,9 +43,9 @@ interface Signataire {
 interface CreateSignataire {
   nom: string;
   prenom: string;
-  grade?: string | null;  // AJOUTÉ : grade optionnel
+  grade?: string | null;
   fonction: string;
-  titre: string;
+  titre?: string | null;  // Changé: optionnel
   ordre_signature?: number;
   actif?: number;
 }
@@ -59,6 +61,10 @@ export default function SignatairesManager() {
   const [sortBy, setSortBy] = useState<'nom' | 'prenom' | 'grade' | 'fonction' | 'titre' | 'ordre_signature' | 'id'>('ordre_signature');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const itemsPerPage = 10;
+  
+  // États pour la sélection multiple
+  const [selectedRows, setSelectedRows] = useState<number[]>([]);
+  const [deleteMultipleModal, setDeleteMultipleModal] = useState(false);
 
   // État du formulaire
   const [formData, setFormData] = useState({
@@ -89,7 +95,7 @@ export default function SignatairesManager() {
       s.prenom.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (s.grade && s.grade.toLowerCase().includes(searchTerm.toLowerCase())) ||
       s.fonction.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.titre.toLowerCase().includes(searchTerm.toLowerCase())
+      (s.titre && s.titre.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
     return [...filtered].sort((a, b) => {
@@ -107,7 +113,9 @@ export default function SignatairesManager() {
       } else if (sortBy === 'fonction') {
         comparison = a.fonction.localeCompare(b.fonction);
       } else if (sortBy === 'titre') {
-        comparison = a.titre.localeCompare(b.titre);
+        const titreA = a.titre || '';
+        const titreB = b.titre || '';
+        comparison = titreA.localeCompare(titreB);
       } else if (sortBy === 'ordre_signature') {
         comparison = a.ordre_signature - b.ordre_signature;
       }
@@ -161,6 +169,22 @@ export default function SignatairesManager() {
     }
   });
 
+  // Supprimer plusieurs signataires
+  const deleteMultipleMutation = useMutation({
+    mutationFn: async (ids: number[]) => {
+      const promises = ids.map(id => invoke('delete_signataire', { id }));
+      await Promise.all(promises);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['signataires'] });
+      setSelectedRows([]);
+      setDeleteMultipleModal(false);
+    },
+    onError: (error) => {
+      console.error('Erreur lors de la suppression multiple:', error);
+    }
+  });
+
   const resetForm = () => {
     setEditingId(null);
     setFormData({
@@ -186,7 +210,7 @@ export default function SignatairesManager() {
       prenom: item.prenom,
       grade: item.grade || '',
       fonction: item.fonction,
-      titre: item.titre,
+      titre: item.titre || '',
       ordre_signature: item.ordre_signature,
       actif: item.actif === 1,
     });
@@ -194,16 +218,16 @@ export default function SignatairesManager() {
   };
 
   const handleSubmit = () => {
-    if (!formData.nom.trim() || !formData.prenom.trim() || !formData.fonction.trim() || !formData.titre.trim()) {
+    if (!formData.nom.trim() || !formData.prenom.trim() || !formData.fonction.trim()) {
       return;
     }
 
     const submitData = {
       nom: formData.nom.trim(),
       prenom: formData.prenom.trim(),
-      grade: formData.grade.trim() || null,  // Envoyer null si vide
+      grade: formData.grade.trim() || null,
       fonction: formData.fonction.trim(),
-      titre: formData.titre.trim(),
+      titre: formData.titre.trim() || null,  // Peut être null
       ordre_signature: formData.ordre_signature,
       actif: formData.actif ? 1 : 0,
     };
@@ -223,6 +247,22 @@ export default function SignatairesManager() {
       setSortOrder('asc');
     }
     setCurrentPage(1);
+  };
+
+  // Sélectionner/déselectionner toutes les lignes de la page courante
+  const toggleAllRows = () => {
+    if (selectedRows.length === paginatedData.length) {
+      setSelectedRows([]);
+    } else {
+      setSelectedRows(paginatedData.map(item => item.id));
+    }
+  };
+
+  // Sélectionner/déselectionner une ligne
+  const toggleRow = (id: number) => {
+    setSelectedRows(prev =>
+      prev.includes(id) ? prev.filter(rowId => rowId !== id) : [...prev, id]
+    );
   };
 
   if (isLoading) {
@@ -246,7 +286,7 @@ export default function SignatairesManager() {
 
   return (
     <Stack p="md" gap="lg">
-      {/* HEADER - Même style que ImportExcel */}
+      {/* HEADER */}
       <Card withBorder radius="md" p="lg" bg="adminBlue.8">
         <Group justify="space-between">
           <Stack gap={2}>
@@ -272,14 +312,26 @@ export default function SignatairesManager() {
                 {filteredAndSortedData.length} signataire{filteredAndSortedData.length > 1 ? 's' : ''} enregistré{filteredAndSortedData.length > 1 ? 's' : ''}
               </Text>
             </div>
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={openCreateModal}
-              variant="gradient"
-              gradient={{ from: 'blue', to: 'cyan' }}
-            >
-              Ajouter un signataire
-            </Button>
+            <Group>
+              {selectedRows.length > 0 && (
+                <Button
+                  leftSection={<IconTrashX size={16} />}
+                  onClick={() => setDeleteMultipleModal(true)}
+                  color="red"
+                  variant="light"
+                >
+                  Supprimer ({selectedRows.length})
+                </Button>
+              )}
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={openCreateModal}
+                variant="gradient"
+                gradient={{ from: 'blue', to: 'cyan' }}
+              >
+                Ajouter un signataire
+              </Button>
+            </Group>
           </Group>
 
           <Divider />
@@ -306,6 +358,13 @@ export default function SignatairesManager() {
                 <Table striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
+                      <Table.Th style={{ width: 40 }}>
+                        <Checkbox
+                          checked={paginatedData.length > 0 && selectedRows.length === paginatedData.length}
+                          indeterminate={selectedRows.length > 0 && selectedRows.length < paginatedData.length}
+                          onChange={toggleAllRows}
+                        />
+                      </Table.Th>
                       <Table.Th
                         style={{ width: 70, cursor: 'pointer' }}
                         onClick={() => handleSort('id')}
@@ -358,6 +417,12 @@ export default function SignatairesManager() {
                       return (
                         <Table.Tr key={item.id}>
                           <Table.Td>
+                            <Checkbox
+                              checked={selectedRows.includes(item.id)}
+                              onChange={() => toggleRow(item.id)}
+                            />
+                          </Table.Td>
+                          <Table.Td>
                             <Badge color="gray" variant="light" size="sm">
                               {numero}
                             </Badge>
@@ -394,9 +459,15 @@ export default function SignatairesManager() {
                             </Badge>
                           </Table.Td>
                           <Table.Td>
-                            <Badge color="blue" variant="light" size="sm">
-                              {item.titre}
-                            </Badge>
+                            {item.titre ? (
+                              <Badge color="blue" variant="light" size="sm">
+                                {item.titre}
+                              </Badge>
+                            ) : (
+                              <Badge color="gray" variant="light" size="sm">
+                                -
+                              </Badge>
+                            )}
                           </Table.Td>
                           <Table.Td style={{ textAlign: 'center' }}>
                             <Badge
@@ -506,11 +577,10 @@ export default function SignatairesManager() {
 
           <TextInput
             label="Titre"
-            placeholder="Ex: Colonel"
+            placeholder="Ex: Colonel (optionnel)"
             value={formData.titre}
             onChange={(e) => setFormData({ ...formData, titre: e.target.value })}
-            withAsterisk
-            description="Titre civil ou académique"
+            description="Titre civil ou académique (optionnel)"
           />
 
           <Switch
@@ -530,7 +600,7 @@ export default function SignatairesManager() {
               loading={createMutation.isPending || updateMutation.isPending}
               variant="gradient"
               gradient={{ from: 'blue', to: 'cyan' }}
-              disabled={!formData.nom.trim() || !formData.prenom.trim() || !formData.fonction.trim() || !formData.titre.trim()}
+              disabled={!formData.nom.trim() || !formData.prenom.trim() || !formData.fonction.trim()}
             >
               {editingId ? 'Mettre à jour' : 'Ajouter'}
             </Button>
@@ -538,7 +608,7 @@ export default function SignatairesManager() {
         </Stack>
       </Modal>
 
-      {/* MODAL DE CONFIRMATION SUPPRESSION */}
+      {/* MODAL DE CONFIRMATION SUPPRESSION (SIMPLE) */}
       <Modal
         opened={deleteId !== null}
         onClose={() => setDeleteId(null)}
@@ -566,16 +636,45 @@ export default function SignatairesManager() {
         </Stack>
       </Modal>
 
+      {/* MODAL DE CONFIRMATION SUPPRESSION MULTIPLE */}
+      <Modal
+        opened={deleteMultipleModal}
+        onClose={() => setDeleteMultipleModal(false)}
+        title="Confirmation suppression multiple"
+        centered
+      >
+        <Stack>
+          <Text>Êtes-vous sûr de vouloir supprimer {selectedRows.length} signataire{selectedRows.length > 1 ? 's' : ''} ?</Text>
+          <Text size="sm" c="dimmed">Cette action est irréversible.</Text>
+          <Text size="sm" c="orange" fw={500}>
+            ⚠️ Attention: Ces signataires ne pourront plus signer les documents officiels.
+          </Text>
+          <Group justify="flex-end" mt="md">
+            <Button variant="light" onClick={() => setDeleteMultipleModal(false)}>
+              Annuler
+            </Button>
+            <Button
+              color="red"
+              onClick={() => deleteMultipleMutation.mutate(selectedRows)}
+              loading={deleteMultipleMutation.isPending}
+            >
+              Supprimer ({selectedRows.length})
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
       {/* SECTION INSTRUCTIONS */}
       <Card withBorder radius="md" p="lg">
         <Title order={5} mb="md">📋 Instructions</Title>
         <Stack gap="xs">
           <Text size="sm">1. Les signataires sont les personnes habilitées à signer les documents officiels</Text>
           <Text size="sm">2. L'ordre de signature détermine l'ordre de priorité (1 = premier signataire)</Text>
-          <Text size="sm">3. Renseignez la fonction et le titre pour l'identification officielle</Text>
-          <Text size="sm">4. Le grade est optionnel mais recommandé pour les officiers supérieurs</Text>
+          <Text size="sm">3. Renseignez la fonction pour l'identification officielle</Text>
+          <Text size="sm">4. Le grade et le titre sont optionnels</Text>
           <Text size="sm">5. Seuls les signataires actifs apparaîtront dans les listes de signature</Text>
-          <Text size="sm">6. Utilisez la recherche pour trouver rapidement un signataire</Text>
+          <Text size="sm">6. Utilisez les cases à cocher pour supprimer plusieurs signataires à la fois</Text>
+          <Text size="sm">7. Utilisez la recherche pour trouver rapidement un signataire</Text>
         </Stack>
       </Card>
     </Stack>
