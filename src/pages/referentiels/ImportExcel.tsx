@@ -10,15 +10,13 @@ import {
   Alert,
   Table,
   Badge,
-  Progress,
   Tabs,
   Paper,
   ScrollArea,
   Divider,
-  Loader,
   ThemeIcon,
 } from '@mantine/core';
-import { IconUpload, IconFileExcel, IconCheck, IconX, IconDownload, IconAlertCircle, IconTableImport } from '@tabler/icons-react';
+import { IconUpload, IconFileExcel, IconCheck, IconDownload, IconAlertCircle, IconTableImport } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
 import * as XLSX from 'xlsx';
 
@@ -43,19 +41,19 @@ const ENTITY_CONFIG: Record<EntityType, { label: string; columns: string[]; requ
   modules: {
     label: 'Modules',
     columns: ['designation', 'cycle_id', 'cycle'],
-    requiredColumns: ['designation'], // cycle_id ou cycle est accepté
+    requiredColumns: ['designation'],
     backendFunction: 'import_modules',
   },
   matieres: {
     label: 'Matières',
     columns: ['designation', 'module_id', 'module', 'vhoraire', 'coefficient', 'observation'],
-    requiredColumns: ['designation', 'vhoraire'], // module_id ou module est accepté
+    requiredColumns: ['designation', 'vhoraire'],
     backendFunction: 'import_matieres',
   },
   enseignants: {
     label: 'Enseignants',
     columns: ['nom', 'prenom', 'telephone', 'titre', 'statut'],
-    requiredColumns: ['nom', 'prenom'],
+    requiredColumns: ['nom', 'prenom', 'titre', 'statut'],
     backendFunction: 'import_enseignants',
   },
   banques: {
@@ -84,14 +82,11 @@ const ENTITY_CONFIG: Record<EntityType, { label: string; columns: string[]; requ
   },
   comptes_bancaires: {
     label: 'Comptes Bancaires',
-    columns: ['enseignant_nom', 'enseignant_prenom', 'banque_designation', 'numero_compte'],
+    columns: ['enseignant_nom', 'enseignant_prenom', 'banque_designation', 'numero_compte', 'cle_rib'],
     requiredColumns: ['enseignant_nom', 'enseignant_prenom', 'banque_designation', 'numero_compte'],
     backendFunction: 'import_comptes_bancaires',
   },
 };
-
-const STATUTS = ['interne', 'externe'];
-const TITRES = ['directeur', 'chef de service', 'chef de division/service', 'agent', 'retraité', 'autre'];
 
 export default function ImportExcel() {
   const [activeTab, setActiveTab] = useState<EntityType>('cycles');
@@ -219,30 +214,29 @@ export default function ImportExcel() {
         break;
       case 'modules':
         templateData = [
-          { designation: 'module1', cycle_id: 1 },
-          { designation: 'module2', cycle_id: 1 },
-          { designation: 'module3', cycle_id: 1 },
-          { designation: 'module4', cycle_id: 2 },
-          { designation: 'module5', cycle_id: 2 },
+          { designation: 'Module 1', cycle_id: 1 },
+          { designation: 'Module 2', cycle_id: 1 },
+          { designation: 'Module 3', cycle: 'EL Sous-officiers PN' },
         ];
         break;
       case 'matieres':
         templateData = [
-          { designation: 'Ecole du Soldat', module_id: 1, vhoraire: 225, coefficient: 3, observation: 'Spécifique' },
-          { designation: 'Topographie', module_id: 1, vhoraire: 20, coefficient: 1, observation: '' },
-          { designation: 'Ethique', module_id: 2, vhoraire: 30, coefficient: 1.5, observation: 'Spécifique' },
+          { designation: 'Mathématiques', module_id: 1, vhoraire: 60 },
+          { designation: 'Français', module: 'Module 1', vhoraire: 45 },
         ];
         break;
       case 'enseignants':
         templateData = [
           { nom: 'KORGO', prenom: 'Jacques', telephone: '75118161', titre: 'agent', statut: 'externe' },
           { nom: 'DJAFOU', prenom: 'Boureima', telephone: '75301138', titre: 'chef de service', statut: 'interne' },
+          { nom: 'OUATTARA', prenom: 'Moussa', telephone: '70123456', titre: 'directeur', statut: 'interne' },
         ];
         break;
       case 'banques':
         templateData = [
           { designation: 'ORABANK' },
           { designation: 'CORIS BANK INTERNATIONALE' },
+          { designation: 'ECOBANK' },
         ];
         break;
       case 'promotions':
@@ -253,8 +247,11 @@ export default function ImportExcel() {
         break;
       case 'plafonds':
         templateData = [
-          { titre: 'agent', statut: 'interne', volume_horaire_max: 100 },
+          { titre: 'agent', statut: 'interne', volume_horaire_max: 180 },
           { titre: 'directeur', statut: 'interne', volume_horaire_max: 140 },
+          { titre: 'chef de service', statut: 'interne', volume_horaire_max: 160 },
+          { titre: 'agent', statut: 'externe', volume_horaire_max: 180 },
+          { titre: 'directeur', statut: 'externe', volume_horaire_max: 140 },
         ];
         break;
       case 'annees_scolaires':
@@ -265,7 +262,8 @@ export default function ImportExcel() {
         break;
       case 'comptes_bancaires':
         templateData = [
-          { enseignant_nom: 'KORGO', enseignant_prenom: 'Jacques', banque_designation: 'ORABANK', numero_compte: '612095100001' },
+          { enseignant_nom: 'KORGO', enseignant_prenom: 'Jacques', banque_designation: 'ORABANK', numero_compte: '612095100001', cle_rib: '23' },
+          { enseignant_nom: 'DJAFOU', enseignant_prenom: 'Boureima', banque_designation: 'ECOBANK', numero_compte: '612095100002', cle_rib: '45' },
         ];
         break;
       default:
@@ -325,7 +323,14 @@ export default function ImportExcel() {
             const normalized: ExcelRow = {};
             for (const key of Object.keys(row)) {
               const normalizedKey = key.toLowerCase().trim();
-              normalized[normalizedKey] = row[key];
+              let value = row[key];
+              
+              // Convertir les nombres en chaînes pour cle_rib si nécessaire
+              if (normalizedKey === 'cle_rib' && typeof value === 'number') {
+                value = value.toString();
+              }
+              
+              normalized[normalizedKey] = value;
             }
             return normalized;
           });
@@ -599,9 +604,12 @@ export default function ImportExcel() {
           <Text size="sm">• Pour les matières, utilisez "module_id" (l'ID du module) ou "module" (le nom du module)</Text>
           <Text size="sm">• Pour les enseignants, le statut doit être "interne" ou "externe"</Text>
           <Text size="sm">• Pour les enseignants, le titre doit être parmi: directeur, chef de service, chef de division/service, agent, retraité, autre</Text>
+          <Text size="sm">• Le volume horaire maximum (vh_max) est automatiquement défini par le plafond correspondant</Text>
           <Text size="sm">• Pour les années scolaires, le format doit être YYYY-YYYY (ex: 2025-2026)</Text>
           <Text size="sm">• Pour les comptes bancaires, l'enseignant et la banque doivent déjà exister dans la base</Text>
+          <Text size="sm">• La clé RIB (cle_rib) doit être au format texte</Text>
           <Text size="sm">• Les lignes en erreur sont ignorées, les lignes valides sont importées</Text>
+          <Text size="sm">• Assurez-vous que les plafonds existent avant d'importer les enseignants</Text>
         </Stack>
       </Card>
     </Stack>

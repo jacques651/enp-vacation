@@ -54,48 +54,7 @@ CREATE TABLE IF NOT EXISTS matieres (
 );
 
 -- =====================================================
--- 2. ENSEIGNANTS & BANQUES
--- =====================================================
-
--- -----------------------------
--- 2.1 ENSEIGNANTS
--- -----------------------------
-CREATE TABLE IF NOT EXISTS enseignants (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nom TEXT NOT NULL,
-    prenom TEXT NOT NULL,
-    telephone TEXT,
-    titre TEXT NOT NULL,
-    statut TEXT NOT NULL,
-    CHECK (titre IN ('directeur','chef de service','chef de division/service','agent','retraité','autre')),
-    CHECK (statut IN ('interne','externe'))
-);
-
--- -----------------------------
--- 2.2 BANQUES
--- -----------------------------
-CREATE TABLE IF NOT EXISTS banques (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    designation TEXT NOT NULL UNIQUE
-);
-
--- -----------------------------
--- 2.3 COMPTES BANCAIRES
--- -----------------------------
-CREATE TABLE IF NOT EXISTS comptes_bancaires (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    enseignant_id INTEGER NOT NULL,
-    banque_id INTEGER NOT NULL,
-    numero_compte TEXT NOT NULL,
-    actif INTEGER DEFAULT 1,
-    date_debut DATE,
-    date_fin DATE,
-    FOREIGN KEY (enseignant_id) REFERENCES enseignants(id),
-    FOREIGN KEY (banque_id) REFERENCES banques(id)
-);
-
--- =====================================================
--- 3. PLAFONDS
+-- 2. PLAFONDS
 -- =====================================================
 CREATE TABLE IF NOT EXISTS plafonds (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,6 +64,48 @@ CREATE TABLE IF NOT EXISTS plafonds (
     UNIQUE (titre, statut),
     CHECK (titre IN ('directeur','chef de service','chef de division/service','agent','retraité','autre')),
     CHECK (statut IN ('interne','externe'))
+);
+-- =====================================================
+-- 3. ENSEIGNANTS & BANQUES
+-- =====================================================
+
+-- -----------------------------
+-- 3.1 ENSEIGNANTS
+-- -----------------------------
+CREATE TABLE IF NOT EXISTS enseignants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nom TEXT NOT NULL,
+    prenom TEXT NOT NULL,
+    telephone TEXT,
+    titre TEXT NOT NULL,
+    statut TEXT NOT NULL,
+    vh_max REAL DEFAULT 0,
+    CHECK (titre IN ('directeur','chef de service','chef de division/service','agent','retraité','autre')),
+    CHECK (statut IN ('interne','externe'))
+);
+
+-- -----------------------------
+-- 3.2 BANQUES
+-- -----------------------------
+CREATE TABLE IF NOT EXISTS banques (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    designation TEXT NOT NULL UNIQUE
+);
+
+-- -----------------------------
+-- 3.3 COMPTES BANCAIRES
+-- -----------------------------
+CREATE TABLE IF NOT EXISTS comptes_bancaires (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    enseignant_id INTEGER NOT NULL,
+    banque_id INTEGER NOT NULL,
+    numero_compte TEXT NOT NULL,
+    cle_rib TEXT NOT NULL,
+    actif INTEGER DEFAULT 1,
+    date_debut DATE,
+    date_fin DATE,
+    FOREIGN KEY (enseignant_id) REFERENCES enseignants(id),
+    FOREIGN KEY (banque_id) REFERENCES banques(id)
 );
 
 -- =====================================================

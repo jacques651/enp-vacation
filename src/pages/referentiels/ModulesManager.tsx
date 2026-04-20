@@ -421,7 +421,7 @@ interface CreateModule {
         <Stack gap="md">
           <TextInput
             label="Désignation"
-            placeholder="Ex: Mathématiques, Sciences Physiques, Français..."
+            placeholder="Ex: module1, module2, module3..."
             value={formData.designation}
             onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
             withAsterisk

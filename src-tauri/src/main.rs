@@ -28,7 +28,6 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-
             // ================= CYCLES =================
             get_cycles,
             get_cycle_by_id,
@@ -38,7 +37,6 @@ fn main() {
             search_cycles,
             count_cycles,
             get_cycle_by_designation,
-            
             // ================= MODULES =================
             get_modules,
             get_module_by_id,
@@ -46,7 +44,6 @@ fn main() {
             update_module,
             delete_module,
             search_modules,
-            
             // ================= MATIERES =================
             get_matieres,
             get_matiere_by_id,
@@ -54,7 +51,6 @@ fn main() {
             update_matiere,
             delete_matiere,
             search_matieres,
-            
             // ================= ENSEIGNANTS =================
             get_enseignants,
             get_enseignant_by_id,
@@ -62,22 +58,22 @@ fn main() {
             update_enseignant,
             delete_enseignant,
             get_enseignants_with_cumul,
-            
             // ================= BANQUES =================
             get_banques,
             get_banque_by_id,
             create_banque,
             update_banque,
             delete_banque,
-            
             // ================= COMPTES BANCAIRES =================
             get_comptes_by_enseignant,
-            get_comptes,
             create_compte_bancaire,
-            get_compte_by_id,
-            set_compte_actif,
-            delete_compte,
-            
+            get_comptes_bancaires,
+            get_compte_bancaire_by_id,
+            get_comptes_by_enseignant,
+            create_compte_bancaire,
+            update_compte_bancaire,
+            delete_compte_bancaire,
+            set_compte_bancaire_actif,
             // ================= PROMOTIONS =================
             get_promotions,
             get_promotion_by_id,
@@ -85,7 +81,6 @@ fn main() {
             update_promotion,
             delete_promotion,
             search_promotions,
-            
             // ================= ANNEES SCOLAIRES =================
             get_annees_scolaires,
             get_annee_scolaire_by_id,
@@ -93,7 +88,6 @@ fn main() {
             update_annee_scolaire,
             delete_annee_scolaire,
             search_annees_scolaires,
-            
             // ================= PLAFONDS =================
             get_plafonds,
             get_plafond_by_id,
@@ -101,7 +95,6 @@ fn main() {
             update_plafond,
             delete_plafond,
             get_volume_horaire_max,
-            
             // ================= SIGNAIRES =================
             get_signataires,
             get_signataire_by_id,
@@ -110,7 +103,6 @@ fn main() {
             delete_signataire,
             search_signataires,
             get_signataires_actifs,
-            
             // ================= ENTETE (PARAMETRES) =================
             create_entete,
             get_entetes,
@@ -121,29 +113,24 @@ fn main() {
             delete_entete,
             init_default_entetes,
             update_entete,
-            
             // ================= GESTION DU LOGO =================
             upload_logo_base64,
             get_logo_base64,
             delete_logo_base64,
-            
             // ================= VACATIONS =================
             create_vacation,
             get_vacations,
             update_vacation,
             delete_vacation,
             calculate_vacation,
-            
             // ================= ORDRES DE VIREMENT =================
             generer_ordre_virement,
-            
+            get_ordres_virement,
             // ================= ETATS DE LIQUIDATION =================
             get_etat_liquidation,
             get_totaux_liquidation,
-            
             // ================= DASHBOARD =================
             get_dashboard_stats,
-            
             // ================= IMPORT =================
             import_cycles,
             import_modules,
@@ -154,7 +141,6 @@ fn main() {
             import_plafonds,
             import_annees_scolaires,
             import_comptes_bancaires,
-            
             // ================= EXPORT =================
             export_all_data_json,
         ])

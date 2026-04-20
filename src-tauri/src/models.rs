@@ -77,6 +77,8 @@ pub struct MatiereWithModule {
 // =========================
 // 📌 ENSEIGNANTS
 // =========================
+
+// Structure de base
 #[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct Enseignant {
     pub id: i64,
@@ -85,9 +87,10 @@ pub struct Enseignant {
     pub telephone: Option<String>,
     pub titre: String,
     pub statut: String,
+    pub vh_max: f64,
 }
 
-// Enseignant avec volume horaire maximum (depuis plafond)
+// Enseignant avec volume horaire maximum
 #[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct EnseignantWithPlafond {
     pub id: i64,
@@ -96,7 +99,20 @@ pub struct EnseignantWithPlafond {
     pub telephone: Option<String>,
     pub titre: String,
     pub statut: String,
-    pub volume_horaire_max: i64,
+    pub volume_horaire_max: f64,
+}
+
+// Enseignant avec cumul (heures consommées et restantes)
+#[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
+pub struct EnseignantCumul {
+    pub id: i64,
+    pub nom: String,
+    pub prenom: String,
+    pub titre: String,
+    pub statut: String,
+    pub volume_max: f64,
+    pub heures_consommees: f64,
+    pub heures_restantes: f64,
 }
 
 // Enseignant avec compte bancaire actif
@@ -108,9 +124,11 @@ pub struct EnseignantWithCompte {
     pub telephone: Option<String>,
     pub titre: String,
     pub statut: String,
+    pub vh_max: f64,
     pub banque_id: Option<i64>,
     pub banque_designation: Option<String>,
     pub numero_compte: Option<String>,
+    pub cle_rib: Option<String>,
     pub actif: Option<i32>,
 }
 
@@ -126,29 +144,38 @@ pub struct Banque {
 // =========================
 // 📌 COMPTES BANCAIRES
 // =========================
+
+// Version simple (sans jointures)
+#[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
+pub struct CompteBancaireSimple {
+    pub id: i64,
+    pub enseignant_id: i64,
+    pub banque_id: i64,
+    pub numero_compte: String,
+    pub cle_rib: String,
+    pub actif: i32,
+    pub date_debut: Option<String>,
+    pub date_fin: Option<String>,
+}
+
+// Version avec jointures (pour l'affichage)
 #[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct CompteBancaire {
     pub id: i64,
     pub enseignant_id: i64,
     pub banque_id: i64,
     pub numero_compte: String,
+    pub cle_rib: String,
     pub actif: i32,
     pub date_debut: Option<String>,
     pub date_fin: Option<String>,
+    pub enseignant_nom: String,
+    pub enseignant_prenom: String,
+    pub banque_designation: String,
 }
 
-// Compte avec détails banque
-#[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
-pub struct CompteBancaireWithBanque {
-    pub id: i64,
-    pub enseignant_id: i64,
-    pub banque_id: i64,
-    pub banque_designation: String,
-    pub numero_compte: String,
-    pub actif: i32,
-    pub date_debut: Option<String>,
-    pub date_fin: Option<String>,
-}
+// Alias pour compatibilité
+pub type CompteBancaireWithBanque = CompteBancaire;
 
 // =========================
 // 📌 PLAFONDS
@@ -180,10 +207,11 @@ pub struct Vacation {
     pub date_traitement: String,
 }
 
-// Vacation avec toutes les jointures (vue v_etat_liquidation)
+// Vacation avec toutes les jointures
 #[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct VacationDetail {
-    pub numero_ordre: i64,
+    pub id: i64,
+    pub numero_ordre: Option<i64>,
     pub nom: String,
     pub prenom: String,
     pub titre: String,
@@ -191,7 +219,6 @@ pub struct VacationDetail {
     pub cycle: String,
     pub module: String,
     pub matiere: String,
-    pub banque: Option<String>,
     pub vhoraire: f64,
     pub nb_classe: i64,
     pub vht: f64,
@@ -242,6 +269,7 @@ pub struct LigneOrdre {
     pub ordre_id: i64,
     pub enseignant_id: i64,
     pub compte_bancaire_id: i64,
+    pub cle_rib: String,
     pub montant_brut: f64,
     pub retenue: f64,
     pub montant_net: f64,
@@ -256,6 +284,7 @@ pub struct LigneOrdreDetail {
     pub titre: String,
     pub statut: String,
     pub numero_compte: String,
+    pub cle_rib: String,
     pub banque_designation: String,
     pub montant_brut: f64,
     pub retenue: f64,
@@ -311,7 +340,7 @@ pub struct Entete {
 pub struct ParametresEtablissement {
     pub nom_etablissement: String,
     pub sigle: String,
-    pub logo: Option<String>, // Base64
+    pub logo: Option<String>,
     pub adresse: String,
     pub telephone: String,
     pub email: String,
@@ -359,6 +388,7 @@ pub struct CompteBancaireInput {
     pub enseignant_id: i64,
     pub banque_id: i64,
     pub numero_compte: String,
+    pub cle_rib: String,
     pub actif: Option<i32>,
     pub date_debut: Option<String>,
     pub date_fin: Option<String>,
@@ -383,7 +413,7 @@ pub struct OrdreVirementInput {
     pub numero_ordre: String,
     pub date_edition: String,
     pub objet: Option<String>,
-    pub vacations_ids: Vec<i64>, // IDs des vacations à inclure
+    pub vacations_ids: Vec<i64>,
 }
 
 // =========================
@@ -463,4 +493,56 @@ impl Default for ApiResponse<()> {
             error: None,
         }
     }
+}
+
+// =========================
+// 📌 ORDRES DE VIREMENT (COMPLÉMENT)
+// =========================
+
+// Structure pour la réponse de génération d'ordre
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OrdreVirementGenerated {
+    pub id: i64,
+    pub banque_id: i64,
+    pub banque_designation: String,
+    pub numero_ordre: String,
+    pub date_edition: String,
+    pub objet: String,
+    pub total_net: f64,
+    pub lignes: Vec<LigneOrdreGenerated>,
+}
+
+// Structure pour les lignes d'ordre générées
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LigneOrdreGenerated {
+    pub id: i64,
+    pub enseignant_id: i64,
+    pub nom: String,
+    pub prenom: String,
+    pub titre: String,
+    pub statut: String,
+    pub compte_bancaire_id: i64,
+    pub numero_compte: String,
+    pub cle_rib: String,
+    pub banque_designation: String,
+    pub montant_brut: f64,
+    pub retenue: f64,
+    pub montant_net: f64,
+}
+
+// Structure pour le regroupement par enseignant (génération)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EnseignantVacationTotal {
+    pub enseignant_id: i64,
+    pub nom: String,
+    pub prenom: String,
+    pub titre: String,
+    pub statut: String,
+    pub numero_compte: Option<String>,
+    pub cle_rib: Option<String>,
+    pub banque_designation: Option<String>,
+    pub banque_id: Option<i64>,
+    pub montant_brut: f64,
+    pub retenue: f64,
+    pub montant_net: f64,
 }

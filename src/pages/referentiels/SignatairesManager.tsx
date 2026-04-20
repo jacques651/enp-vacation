@@ -542,7 +542,7 @@ export default function SignatairesManager() {
 
           <TextInput
             label="Nom"
-            placeholder="Ex: DIALLO"
+            placeholder="Ex: KORGO"
             value={formData.nom}
             onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
             withAsterisk
@@ -551,7 +551,7 @@ export default function SignatairesManager() {
 
           <TextInput
             label="Prénom"
-            placeholder="Ex: Amadou"
+            placeholder="Ex: Jacques"
             value={formData.prenom}
             onChange={(e) => setFormData({ ...formData, prenom: e.target.value })}
             withAsterisk
@@ -577,7 +577,7 @@ export default function SignatairesManager() {
 
           <TextInput
             label="Titre"
-            placeholder="Ex: Colonel (optionnel)"
+            placeholder="Ex: Chevalier de l'Ordre de l'Etalon (optionnel)"
             value={formData.titre}
             onChange={(e) => setFormData({ ...formData, titre: e.target.value })}
             description="Titre civil ou académique (optionnel)"

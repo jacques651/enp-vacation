@@ -19,8 +19,18 @@ import {
   Modal,
   Pagination,
   TextInput,
+  Tooltip,
 } from '@mantine/core';
-import { IconClock, IconCheck, IconAlertCircle, IconEdit, IconTrash, IconPlus, IconSearch } from '@tabler/icons-react';
+import {
+  IconClock,
+  IconCheck,
+  IconAlertCircle,
+  IconEdit,
+  IconTrash,
+  IconPlus,
+  IconSearch,
+  IconInfoCircle,
+} from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -39,6 +49,7 @@ interface CreatePlafond {
 
 const TITRES_VALIDES = [
   { value: 'directeur', label: 'Directeur' },
+  { value: 'chef de service', label: 'Chef de service' },
   { value: 'chef de division/service', label: 'Chef de division/service' },
   { value: 'agent', label: 'Agent' },
   { value: 'retraité', label: 'Retraité' },
@@ -46,8 +57,21 @@ const TITRES_VALIDES = [
 ];
 
 const STATUTS_VALIDES = [
-  { value: 'interne', label: 'Interne (fonctionnaire)' },
-  { value: 'externe', label: 'Externe (contractuel)' },
+  { value: 'interne', label: 'Interne' },
+  { value: 'externe', label: 'Externe' },
+];
+
+// Plafonds recommandés par défaut
+const DEFAULT_PLAFONDS = [
+  { titre: 'directeur', statut: 'interne', volume: 140 },
+  { titre: 'directeur', statut: 'externe', volume: 140 },
+  { titre: 'chef de service', statut: 'interne', volume: 160 },
+  { titre: 'chef de division/service', statut: 'externe', volume: 160 },
+  { titre: 'agent', statut: 'interne', volume: 180 },
+  { titre: 'agent', statut: 'externe', volume: 180 },
+  { titre: 'retraité', statut: 'externe', volume: 200 },
+  { titre: 'autre', statut: 'interne', volume: 180 },
+  { titre: 'autre', statut: 'externe', volume: 160 },
 ];
 
 export default function PlafondsManager() {
@@ -59,17 +83,18 @@ export default function PlafondsManager() {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState<'titre' | 'statut' | 'volume_horaire_max' | 'id'>('titre');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [showDefaultDialog, setShowDefaultDialog] = useState(false);
   const itemsPerPage = 10;
 
   // État du formulaire
   const [formData, setFormData] = useState({
     titre: 'agent',
     statut: 'interne',
-    volume_horaire_max: 30,
+    volume_horaire_max: 180,
   });
 
   // Récupérer tous les plafonds
-  const { data: plafonds = [], isLoading, error } = useQuery<Plafond[]>({
+  const { data: plafonds = [], isLoading, error, refetch } = useQuery<Plafond[]>({
     queryKey: ['plafonds'],
     queryFn: async () => {
       const result = await invoke('get_plafonds');
@@ -78,15 +103,21 @@ export default function PlafondsManager() {
     },
   });
 
+  // Vérifier si les plafonds par défaut existent
+  const hasDefaultPlafonds = useMemo(() => {
+    const requiredCombinations = DEFAULT_PLAFONDS.map(p => `${p.titre}|${p.statut}`);
+    const existingCombinations = plafonds.map(p => `${p.titre}|${p.statut}`);
+    return requiredCombinations.every(combo => existingCombinations.includes(combo));
+  }, [plafonds]);
+
   // Filtrer et trier les données
   const filteredAndSortedData = useMemo(() => {
-    // Filtrage par recherche (sur titre et statut)
     let filtered = plafonds.filter(p =>
       p.titre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.statut.toLowerCase().includes(searchTerm.toLowerCase())
+      p.statut.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.volume_horaire_max.toString().includes(searchTerm)
     );
 
-    // Tri
     return [...filtered].sort((a, b) => {
       let comparison = 0;
       if (sortBy === 'id') {
@@ -109,6 +140,28 @@ export default function PlafondsManager() {
     currentPage * itemsPerPage
   );
 
+  // Initialiser les plafonds par défaut
+  const initDefaultPlafondsMutation = useMutation({
+    mutationFn: async () => {
+      for (const plafond of DEFAULT_PLAFONDS) {
+        await invoke('create_plafond', {
+          data: {
+            titre: plafond.titre,
+            statut: plafond.statut,
+            volume_horaire_max: plafond.volume
+          }
+        });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['plafonds'] });
+      setShowDefaultDialog(false);
+    },
+    onError: (error) => {
+      console.error('Erreur:', error);
+    }
+  });
+
   // Créer un plafond
   const createMutation = useMutation({
     mutationFn: (data: CreatePlafond) => invoke('create_plafond', { data }),
@@ -117,22 +170,24 @@ export default function PlafondsManager() {
       setModalOpened(false);
       resetForm();
     },
-    onError: (error) => {
+    onError: (error: any) => {
       console.error('Erreur:', error);
+      alert(error);
     }
   });
 
   // Mettre à jour un plafond
   const updateMutation = useMutation({
-    mutationFn: ({ id, ...data }: { id: number } & CreatePlafond) => 
+    mutationFn: ({ id, ...data }: { id: number } & CreatePlafond) =>
       invoke('update_plafond', { id, data }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plafonds'] });
       setModalOpened(false);
       resetForm();
     },
-    onError: (error) => {
+    onError: (error: any) => {
       console.error('Erreur:', error);
+      alert(error);
     }
   });
 
@@ -143,8 +198,9 @@ export default function PlafondsManager() {
       queryClient.invalidateQueries({ queryKey: ['plafonds'] });
       setDeleteId(null);
     },
-    onError: (error) => {
+    onError: (error: any) => {
       console.error('Erreur:', error);
+      alert(error);
     }
   });
 
@@ -153,7 +209,7 @@ export default function PlafondsManager() {
     setFormData({
       titre: 'agent',
       statut: 'interne',
-      volume_horaire_max: 30,
+      volume_horaire_max: 180,
     });
   };
 
@@ -175,7 +231,6 @@ export default function PlafondsManager() {
   const handleSubmit = () => {
     if (!formData.titre || !formData.statut) return;
     if (!formData.volume_horaire_max || formData.volume_horaire_max <= 0) return;
-    if (formData.volume_horaire_max > 100) return;
 
     if (editingId) {
       updateMutation.mutate({ id: editingId, ...formData });
@@ -249,21 +304,32 @@ export default function PlafondsManager() {
                 Gérez les volumes horaires maximums par titre et statut
               </Text>
             </div>
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={openCreateModal}
-              variant="gradient"
-              gradient={{ from: 'blue', to: 'cyan' }}
-            >
-              Ajouter un plafond
-            </Button>
+            <Group>
+              {!hasDefaultPlafonds && plafonds.length === 0 && (
+                <Button
+                  variant="light"
+                  color="green"
+                  onClick={() => setShowDefaultDialog(true)}
+                >
+                  Initialiser plafonds par défaut
+                </Button>
+              )}
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={openCreateModal}
+                variant="gradient"
+                gradient={{ from: 'blue', to: 'cyan' }}
+              >
+                Ajouter un plafond
+              </Button>
+            </Group>
           </Group>
 
           <Divider />
 
           {/* RECHERCHE */}
           <TextInput
-            placeholder="Rechercher par titre ou statut..."
+            placeholder="Rechercher par titre, statut ou volume..."
             leftSection={<IconSearch size={16} />}
             value={searchTerm}
             onChange={(e) => {
@@ -283,7 +349,7 @@ export default function PlafondsManager() {
                 <Table striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
-                      <Table.Th 
+                      <Table.Th
                         style={{ width: 70, cursor: 'pointer' }}
                         onClick={() => handleSort('id')}
                       >
@@ -292,7 +358,7 @@ export default function PlafondsManager() {
                           <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
                         </Group>
                       </Table.Th>
-                      <Table.Th 
+                      <Table.Th
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleSort('titre')}
                       >
@@ -301,7 +367,7 @@ export default function PlafondsManager() {
                           <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
                         </Group>
                       </Table.Th>
-                      <Table.Th 
+                      <Table.Th
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleSort('statut')}
                       >
@@ -310,7 +376,7 @@ export default function PlafondsManager() {
                           <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
                         </Group>
                       </Table.Th>
-                      <Table.Th 
+                      <Table.Th
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleSort('volume_horaire_max')}
                       >
@@ -338,7 +404,7 @@ export default function PlafondsManager() {
                             </Badge>
                           </Table.Td>
                           <Table.Td>
-                            <Badge 
+                            <Badge
                               color={item.statut === 'interne' ? 'cyan' : 'orange'}
                               variant="light"
                               size="sm"
@@ -379,10 +445,10 @@ export default function PlafondsManager() {
               {/* PAGINATION */}
               {totalPages > 1 && (
                 <Group justify="center" mt="md">
-                  <Pagination 
-                    value={currentPage} 
-                    onChange={setCurrentPage} 
-                    total={totalPages} 
+                  <Pagination
+                    value={currentPage}
+                    onChange={setCurrentPage}
+                    total={totalPages}
                     color="blue"
                   />
                 </Group>
@@ -427,7 +493,7 @@ export default function PlafondsManager() {
             value={formData.statut}
             onChange={(val) => setFormData({ ...formData, statut: val || 'interne' })}
             withAsterisk
-            description="Interne (fonctionnaire) ou Externe (contractuel)"
+            description="Interne ou Externe"
           />
 
           <NumberInput
@@ -436,7 +502,7 @@ export default function PlafondsManager() {
             value={formData.volume_horaire_max}
             onChange={(val) => setFormData({ ...formData, volume_horaire_max: val as number })}
             min={1}
-            max={100}
+            max={400}
             withAsterisk
             description="Nombre d'heures maximum autorisé par année scolaire"
           />
@@ -486,27 +552,75 @@ export default function PlafondsManager() {
         </Stack>
       </Modal>
 
-      {/* SECTION INSTRUCTIONS ET PLAFONDS PAR DÉFAUT */}
+      {/* MODAL INITIALISATION PLAFONDS PAR DÉFAUT */}
+      <Modal
+        opened={showDefaultDialog}
+        onClose={() => setShowDefaultDialog(false)}
+        title="Initialiser les plafonds par défaut"
+        size="md"
+      >
+        <Stack>
+          <Alert icon={<IconInfoCircle size={16} />} color="blue" variant="light">
+            Cette action va créer tous les plafonds recommandés par défaut.
+          </Alert>
+
+          <Text size="sm" fw={500}>Plafonds à créer :</Text>
+          <Table> {/* ← Supprimer size="xs" */}
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Titre</Table.Th>
+                <Table.Th>Statut</Table.Th>
+                <Table.Th>Volume</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {DEFAULT_PLAFONDS.map((p, idx) => (
+                <Table.Tr key={idx}>
+                  <Table.Td>{getTitreLabel(p.titre)}</Table.Td>
+                  <Table.Td>{getStatutLabel(p.statut)}</Table.Td>
+                  <Table.Td>{p.volume}h</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+
+          <Group justify="flex-end" mt="md">
+            <Button variant="light" onClick={() => setShowDefaultDialog(false)}>
+              Annuler
+            </Button>
+            <Button
+              color="green"
+              onClick={() => initDefaultPlafondsMutation.mutate()}
+              loading={initDefaultPlafondsMutation.isPending}
+            >
+              Initialiser
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* SECTION INSTRUCTIONS */}
       <Card withBorder radius="md" p="lg">
         <Title order={5} mb="md">📋 Plafonds par défaut</Title>
         <Stack gap="xs">
-          <Text size="sm" fw={500} mb="xs">💡 Les plafonds recommandés sont déjà configurés :</Text>
-          
+          <Text size="sm" fw={500} mb="xs">💡 Les plafonds recommandés :</Text>
+
           <Group grow>
             <Card withBorder p="xs" bg="gray.0">
-              <Text size="xs" fw={700} c="blue"> Les plafonds horaires pour les Internes (ENP)</Text>
+              <Text size="xs" fw={700} c="blue">📘 Internes (ENP)</Text>
               <Text size="xs">• Directeur: 140h</Text>
               <Text size="xs">• Chef de service: 160h</Text>
-              <Text size="xs">• autres: 180h</Text>
-              <Text size="xs">• Sauf décision contraire du Directeur Général</Text>
+              <Text size="xs">• Agent: 180h</Text>
+              <Text size="xs">• Autre: 180h</Text>
             </Card>
-            
+
             <Card withBorder p="xs" bg="gray.0">
-              <Text size="xs" fw={700} c="orange"> Les plafonds horaires pour les Externes </Text>
+              <Text size="xs" fw={700} c="orange">📙 Externes</Text>
               <Text size="xs">• Directeur: 140h</Text>
               <Text size="xs">• Chef de division/service: 160h</Text>
               <Text size="xs">• Agent: 180h</Text>
               <Text size="xs">• Retraité: 200h</Text>
+              <Text size="xs">• Autre: 160h</Text>
             </Card>
           </Group>
 
@@ -514,11 +628,10 @@ export default function PlafondsManager() {
 
           <Title order={5} mb="xs">📋 Instructions</Title>
           <Text size="sm">1. Les plafonds horaires définissent le volume horaire maximum par enseignant</Text>
-          <Text size="sm">1. Est considéré comme agent, tout enseignant vacataire n'exerçant pas une fonction faisant l'objet de nomination par un acte règlementaire</Text>
           <Text size="sm">2. Chaque combinaison titre/statut doit avoir un plafond unique</Text>
           <Text size="sm">3. Les valeurs par défaut sont préconfigurées selon les normes</Text>
           <Text size="sm">4. Modifiez un plafond pour ajuster les limites horaires</Text>
-          <Text size="sm">5. Le volume horaire maximum ne peut pas dépasser 100h par année scolaire</Text>
+          <Text size="sm">5. Est considéré comme agent, tout enseignant vacataire n'exerçant pas une fonction faisant l'objet de nomination par un acte règlementaire</Text>
         </Stack>
       </Card>
     </Stack>

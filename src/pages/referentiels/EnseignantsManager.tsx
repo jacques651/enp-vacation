@@ -18,10 +18,36 @@ import {
   LoadingOverlay,
   Modal,
   Pagination,
+  Tooltip,
+  Menu,
 } from '@mantine/core';
-import { IconUsers, IconCheck, IconAlertCircle, IconEdit, IconTrash, IconPlus, IconSearch } from '@tabler/icons-react';
+import {
+  IconUsers,
+  IconCheck,
+  IconAlertCircle,
+  IconEdit,
+  IconTrash,
+  IconPlus,
+  IconSearch,
+  IconInfoCircle,
+  IconDownload,
+  IconFileExcel,
+  IconFile,
+  IconFileWord,
+  IconPrinter,
+} from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+
+// Déclaration du type pour jspdf-autotable
+declare module 'jspdf' {
+  interface jsPDF {
+    autoTable: (options: any) => jsPDF;
+  }
+}
 
 interface Enseignant {
   id: number;
@@ -30,6 +56,7 @@ interface Enseignant {
   telephone: string | null;
   titre: string;
   statut: string;
+  vh_max: number;
 }
 
 interface CreateEnseignant {
@@ -50,8 +77,8 @@ const TITRES_VALIDES = [
 ];
 
 const STATUTS_VALIDES = [
-  { value: 'interne', label: 'Interne (fonctionnaire)' },
-  { value: 'externe', label: 'Externe (contractuel)' },
+  { value: 'interne', label: 'Interne' },
+  { value: 'externe', label: 'Externe' },
 ];
 
 export default function EnseignantsManager() {
@@ -63,6 +90,7 @@ export default function EnseignantsManager() {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState<'nom' | 'prenom' | 'id'>('nom');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [exporting, setExporting] = useState(false);
   const itemsPerPage = 10;
 
   // État du formulaire
@@ -86,12 +114,10 @@ export default function EnseignantsManager() {
 
   // Filtrer et trier les données
   const filteredAndSortedData = useMemo(() => {
-    // Filtrage
     let filtered = enseignants.filter(e =>
       `${e.nom} ${e.prenom}`.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    // Tri
     return [...filtered].sort((a, b) => {
       let comparison = 0;
       if (sortBy === 'id') {
@@ -112,7 +138,259 @@ export default function EnseignantsManager() {
     currentPage * itemsPerPage
   );
 
-  // Créer un enseignant
+  // ============================================================
+  // EXPORT EXCEL
+  // ============================================================
+  const exportToExcel = () => {
+    try {
+      setExporting(true);
+      
+      const data = filteredAndSortedData.map(e => ({
+        'ID': e.id,
+        'Nom': e.nom,
+        'Prénom': e.prenom,
+        'Téléphone': e.telephone || '—',
+        'Titre': e.titre,
+        'Statut': e.statut === 'interne' ? 'Interne' : 'Externe',
+        'Volume Horaire Max': e.vh_max,
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Enseignants');
+      
+      // Ajuster la largeur des colonnes
+      ws['!cols'] = [
+        { wch: 8 },  // ID
+        { wch: 20 }, // Nom
+        { wch: 20 }, // Prénom
+        { wch: 15 }, // Téléphone
+        { wch: 25 }, // Titre
+        { wch: 12 }, // Statut
+        { wch: 18 }, // VH Max
+      ];
+
+      XLSX.writeFile(wb, `enseignants_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      alert('✅ Export Excel réussi !');
+    } catch (error) {
+      console.error('Erreur export Excel:', error);
+      alert('❌ Erreur lors de l\'export Excel');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ============================================================
+  // EXPORT PDF
+  // ============================================================
+  const exportToPDF = () => {
+    try {
+      setExporting(true);
+      
+      const doc = new jsPDF('landscape', 'mm', 'a4');
+      
+      doc.setFontSize(18);
+      doc.text('Liste des Enseignants', 14, 15);
+      doc.setFontSize(10);
+      doc.text(`Généré le : ${new Date().toLocaleString('fr-FR')}`, 14, 25);
+      doc.text(`Total : ${filteredAndSortedData.length} enseignant(s)`, 14, 32);
+
+      const tableData = filteredAndSortedData.map(e => [
+        e.id.toString(),
+        e.nom,
+        e.prenom,
+        e.telephone || '—',
+        e.titre,
+        e.statut === 'interne' ? 'Interne' : 'Externe',
+        `${e.vh_max}h`,
+      ]);
+
+      doc.autoTable({
+        head: [['ID', 'Nom', 'Prénom', 'Téléphone', 'Titre', 'Statut', 'VH Max']],
+        body: tableData,
+        startY: 40,
+        theme: 'striped',
+        headStyles: {
+          fillColor: [41, 128, 185],
+          textColor: 255,
+          fontStyle: 'bold',
+        },
+        styles: {
+          fontSize: 9,
+          cellPadding: 2,
+        },
+        columnStyles: {
+          0: { cellWidth: 15 },
+          1: { cellWidth: 40 },
+          2: { cellWidth: 40 },
+          3: { cellWidth: 35 },
+          4: { cellWidth: 45 },
+          5: { cellWidth: 25 },
+          6: { cellWidth: 20 },
+        },
+      });
+
+      doc.save(`enseignants_${new Date().toISOString().split('T')[0]}.pdf`);
+      
+      alert('✅ Export PDF réussi !');
+    } catch (error) {
+      console.error('Erreur export PDF:', error);
+      alert('❌ Erreur lors de l\'export PDF');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ============================================================
+  // EXPORT WORD
+  // ============================================================
+  const exportToWord = () => {
+    try {
+      setExporting(true);
+      
+      const rows = filteredAndSortedData.map(e => `
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 8px;">${e.id}</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${e.nom}</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${e.prenom}</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${e.telephone || '—'}</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${e.titre}</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${e.statut === 'interne' ? 'Interne' : 'Externe'}</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${e.vh_max}h</td>
+        </tr>
+      `).join('');
+
+      const htmlContent = `<!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Liste des Enseignants</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 40px; }
+          h1 { color: #2980b9; border-bottom: 2px solid #2980b9; padding-bottom: 10px; }
+          .info { margin: 20px 0; color: #666; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th { background-color: #2980b9; color: white; padding: 10px; border: 1px solid #ddd; text-align: left; }
+          td { padding: 8px; border: 1px solid #ddd; }
+          tr:nth-child(even) { background-color: #f9f9f9; }
+          .footer { margin-top: 30px; font-size: 12px; color: #666; text-align: center; }
+        </style>
+      </head>
+      <body>
+        <h1>📋 Liste des Enseignants</h1>
+        <div class="info">
+          <p><strong>Date :</strong> ${new Date().toLocaleString('fr-FR')}</p>
+          <p><strong>Total :</strong> ${filteredAndSortedData.length} enseignant(s)</p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Nom</th><th>Prénom</th><th>Téléphone</th><th>Titre</th><th>Statut</th><th>VH Max</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="footer">
+          <p>Document généré automatiquement par le système de gestion des vacations</p>
+        </div>
+      </body>
+      </html>`;
+
+      const blob = new Blob([htmlContent], { type: 'application/msword' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `enseignants_${new Date().toISOString().split('T')[0]}.doc`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      
+      alert('✅ Export Word réussi !');
+    } catch (error) {
+      console.error('Erreur export Word:', error);
+      alert('❌ Erreur lors de l\'export Word');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ============================================================
+  // IMPRESSION
+  // ============================================================
+  const handlePrint = () => {
+    const rows = filteredAndSortedData.map(e => `
+      <tr>
+        <td style="border: 1px solid #ddd; padding: 8px;">${e.id}</td>
+        <td style="border: 1px solid #ddd; padding: 8px;">${e.nom}</td>
+        <td style="border: 1px solid #ddd; padding: 8px;">${e.prenom}</td>
+        <td style="border: 1px solid #ddd; padding: 8px;">${e.telephone || '—'}</td>
+        <td style="border: 1px solid #ddd; padding: 8px;">${e.titre}</td>
+        <td style="border: 1px solid #ddd; padding: 8px;">${e.statut === 'interne' ? 'Interne' : 'Externe'}</td>
+        <td style="border: 1px solid #ddd; padding: 8px;">${e.vh_max}h</td>
+      </tr>
+    `).join('');
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Liste des Enseignants</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          h1 { color: #2980b9; border-bottom: 2px solid #2980b9; padding-bottom: 10px; }
+          .info { margin: 20px 0; color: #666; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th { background-color: #2980b9; color: white; padding: 10px; border: 1px solid #ddd; text-align: left; }
+          td { padding: 8px; border: 1px solid #ddd; }
+          tr:nth-child(even) { background-color: #f9f9f9; }
+          .footer { margin-top: 30px; font-size: 12px; color: #666; text-align: center; }
+          @media print {
+            body { margin: 0; padding: 10px; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>📋 Liste des Enseignants</h1>
+        <div class="info">
+          <p><strong>Date d'impression :</strong> ${new Date().toLocaleString('fr-FR')}</p>
+          <p><strong>Nombre total :</strong> ${filteredAndSortedData.length} enseignant(s)</p>
+          <p><strong>Statistiques :</strong> ${enseignants.filter(e => e.statut === 'interne').length} interne(s) | ${enseignants.filter(e => e.statut === 'externe').length} externe(s)</p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Nom</th><th>Prénom</th><th>Téléphone</th><th>Titre</th><th>Statut</th><th>VH Max</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="footer">
+          <p>Document généré automatiquement par le système de gestion des vacations</p>
+          <p>© ${new Date().getFullYear()} - ENP Vacation Management System</p>
+        </div>
+        <div class="no-print" style="text-align: center; margin-top: 20px;">
+          <button onclick="window.print();" style="padding: 10px 20px; background: #2980b9; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ Imprimer</button>
+          <button onclick="window.close();" style="margin-left: 10px; padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer;">❌ Fermer</button>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+    } else {
+      alert("Veuillez autoriser les pop-ups pour cette application");
+    }
+  };
+
+  // ============================================================
+  // MUTATIONS CRUD
+  // ============================================================
   const createMutation = useMutation({
     mutationFn: (data: CreateEnseignant) => invoke('create_enseignant', { input: data }),
     onSuccess: () => {
@@ -122,12 +400,12 @@ export default function EnseignantsManager() {
     },
     onError: (error) => {
       console.error('Erreur:', error);
+      alert('Erreur lors de la création');
     }
   });
 
-  // Mettre à jour un enseignant
   const updateMutation = useMutation({
-    mutationFn: ({ id, ...data }: { id: number } & CreateEnseignant) => 
+    mutationFn: ({ id, ...data }: { id: number } & CreateEnseignant) =>
       invoke('update_enseignant', { id, input: data }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['enseignants'] });
@@ -136,10 +414,10 @@ export default function EnseignantsManager() {
     },
     onError: (error) => {
       console.error('Erreur:', error);
+      alert('Erreur lors de la modification');
     }
   });
 
-  // Supprimer un enseignant
   const deleteMutation = useMutation({
     mutationFn: (id: number) => invoke('delete_enseignant', { id }),
     onSuccess: () => {
@@ -148,6 +426,7 @@ export default function EnseignantsManager() {
     },
     onError: (error) => {
       console.error('Erreur:', error);
+      alert('Erreur lors de la suppression');
     }
   });
 
@@ -246,14 +525,60 @@ export default function EnseignantsManager() {
                 Gérez les informations des enseignants
               </Text>
             </div>
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={openCreateModal}
-              variant="gradient"
-              gradient={{ from: 'blue', to: 'cyan' }}
-            >
-              Ajouter un enseignant
-            </Button>
+            <Group>
+              {/* Menu d'export */}
+              <Menu shadow="md" width={200}>
+                <Menu.Target>
+                  <Button
+                    leftSection={<IconDownload size={16} />}
+                    variant="outline"
+                    loading={exporting}
+                  >
+                    Exporter
+                  </Button>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Label>Choisir le format</Menu.Label>
+                  <Menu.Item
+                    leftSection={<IconFileExcel size={16} color="#00a84f" />}
+                    onClick={exportToExcel}
+                  >
+                    Excel (.xlsx)
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<IconFile size={16} color="#e74c3c" />}
+                    onClick={exportToPDF}
+                  >
+                    PDF (.pdf)
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<IconFileWord size={16} color="#2980b9" />}
+                    onClick={exportToWord}
+                  >
+                    Word (.doc)
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
+
+              {/* Bouton Impression */}
+              <Button
+                leftSection={<IconPrinter size={16} />}
+                onClick={handlePrint}
+                variant="outline"
+                color="teal"
+              >
+                Imprimer
+              </Button>
+
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={openCreateModal}
+                variant="gradient"
+                gradient={{ from: 'blue', to: 'cyan' }}
+              >
+                Ajouter un enseignant
+              </Button>
+            </Group>
           </Group>
 
           <Divider />
@@ -280,7 +605,7 @@ export default function EnseignantsManager() {
                 <Table striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
-                      <Table.Th 
+                      <Table.Th
                         style={{ width: 70, cursor: 'pointer' }}
                         onClick={() => handleSort('id')}
                       >
@@ -289,7 +614,7 @@ export default function EnseignantsManager() {
                           <IconSearch size={12} style={{ transform: 'rotate(90deg)' }} />
                         </Group>
                       </Table.Th>
-                      <Table.Th 
+                      <Table.Th
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleSort('nom')}
                       >
@@ -301,6 +626,14 @@ export default function EnseignantsManager() {
                       <Table.Th>Téléphone</Table.Th>
                       <Table.Th>Titre</Table.Th>
                       <Table.Th>Statut</Table.Th>
+                      <Table.Th style={{ width: 100, textAlign: 'center' }}>
+                        <Group gap={4} justify="center">
+                          VH Max
+                          <Tooltip label="Volume horaire maximum défini par le plafond">
+                            <IconInfoCircle size={14} />
+                          </Tooltip>
+                        </Group>
+                      </Table.Th>
                       <Table.Th style={{ width: 100, textAlign: 'center' }}>Actions</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
@@ -328,12 +661,22 @@ export default function EnseignantsManager() {
                             </Badge>
                           </Table.Td>
                           <Table.Td>
-                            <Badge 
+                            <Badge
                               color={item.statut === 'interne' ? 'blue' : 'orange'}
                               variant="light"
                               size="sm"
                             >
                               {item.statut === 'interne' ? 'Interne' : 'Externe'}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge
+                              color="green"
+                              variant="light"
+                              size="sm"
+                              style={{ fontFamily: 'monospace' }}
+                            >
+                              {item.vh_max}h
                             </Badge>
                           </Table.Td>
                           <Table.Td>
@@ -364,10 +707,10 @@ export default function EnseignantsManager() {
               {/* PAGINATION */}
               {totalPages > 1 && (
                 <Group justify="center" mt="md">
-                  <Pagination 
-                    value={currentPage} 
-                    onChange={setCurrentPage} 
-                    total={totalPages} 
+                  <Pagination
+                    value={currentPage}
+                    onChange={setCurrentPage}
+                    total={totalPages}
                     color="blue"
                   />
                 </Group>
@@ -397,15 +740,15 @@ export default function EnseignantsManager() {
         <Stack gap="md">
           <TextInput
             label="Nom"
-            placeholder="Ex: DIOP"
+            placeholder="Ex: KORGO"
             value={formData.nom}
             onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
             withAsterisk
           />
-          
+
           <TextInput
             label="Prénom"
-            placeholder="Ex: Amadou"
+            placeholder="Ex: Jacques"
             value={formData.prenom}
             onChange={(e) => setFormData({ ...formData, prenom: e.target.value })}
             withAsterisk
@@ -413,7 +756,7 @@ export default function EnseignantsManager() {
 
           <TextInput
             label="Téléphone"
-            placeholder="Ex: 76 123 45 67"
+            placeholder="Ex: 75 11 81 61"
             value={formData.telephone}
             onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
           />
@@ -435,6 +778,25 @@ export default function EnseignantsManager() {
             onChange={(val) => setFormData({ ...formData, statut: val || 'interne' })}
             withAsterisk
           />
+
+          {formData.titre && formData.statut && (
+            <Alert
+              icon={<IconInfoCircle size={16} />}
+              color="blue"
+              variant="light"
+              radius="md"
+            >
+              <Text size="sm" fw={500}>
+                Volume horaire maximum :
+                <Text component="span" fw={700} ml={5}>
+                  À déterminer selon le titre et statut
+                </Text>
+              </Text>
+              <Text size="xs" c="dimmed" mt={5}>
+                Le volume horaire maximum sera automatiquement défini par le plafond correspondant
+              </Text>
+            </Alert>
+          )}
 
           <Group justify="flex-end" mt="md">
             <Button variant="light" onClick={() => setModalOpened(false)}>

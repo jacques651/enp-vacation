@@ -13,7 +13,6 @@ import {
   ThemeIcon,
   TextInput,
   Select,
-  NumberInput,
   ActionIcon,
   ScrollArea,
   LoadingOverlay,
@@ -23,6 +22,10 @@ import {
   Grid,
   MultiSelect,
   Pagination,
+  Paper,
+  Tooltip,
+  NumberInput,
+  Menu,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -34,10 +37,27 @@ import {
   IconSearch,
   IconFilter,
   IconEye,
-  IconCalculator,
+  IconDownload,
+  IconFileExcel,
+  IconFile,
+  IconFileWord,
+  IconPrinter,
+  IconFileText,
 } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeFile } from '@tauri-apps/plugin-fs';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import { useNavigate } from 'react-router-dom';
+
+declare module 'jspdf' {
+  interface jsPDF {
+    autoTable: (options: any) => jsPDF;
+  }
+}
 
 // ================= TYPES =================
 interface Enseignant {
@@ -79,36 +99,31 @@ interface AnneeScolaire {
 
 interface VacationResponse {
   id: number;
-  enseignant_id: number;
-  cycle_id: number;
-  module_id: number;
-  matiere_id: number;
-  nb_classe: number;
-
-  vhoraire_matiere: number; // ✔ IMPORTANT
-
-  taux_horaire: number;
-  taux_retenue: number;
+  enseignantId: number;
+  cycleId: number;
+  moduleId: number;
+  matiereId: number;
+  nbClasse: number;
+  vhoraireMatiere: number;
+  tauxHoraire: number;
+  tauxRetenue: number;
   vht: number;
-
-  montant_brut: number;
-  montant_retenu: number;
-  montant_net: number;
-
+  montantBrut: number;
+  montantRetenu: number;
+  montantNet: number;
   mois: string;
   annee: number;
-  date_traitement: string;
-
-  annee_scolaire: string;
-  promotion_id: number;
-
-  nom_enseignant?: string;
-  prenom_enseignant?: string;
-  libelle_cycle?: string;
-  libelle_module?: string;
-  libelle_matiere?: string;
-  libelle_promotion?: string;
+  dateTraitement: string;
+  anneeScolaire: string;
+  promotionId: number;
+  nomEnseignant?: string;
+  prenomEnseignant?: string;
+  libelleCycle?: string;
+  libelleModule?: string;
+  libelleMatiere?: string;
+  libellePromotion?: string;
 }
+
 interface VacationInput {
   enseignant_id: number;
   cycle_id: number;
@@ -123,44 +138,6 @@ interface VacationInput {
   promotion_id: number;
 }
 
-interface VacationCalculated {
-  volume_horaire_max_enseignant: number;
-  cumul_volume_horaire_enseignant: number;
-  volume_horaire_restant_enseignant: number;
-
-  vht_total_cycle_matiere: number;
-  cumul_vht_cycle_matiere: number;
-  vht_restant_cycle_matiere: number;
-
-  nb_classe: number;
-
-  vhoraire_matiere: number; // ✔ IMPORTANT
-
-  vht_demande: number;
-
-  montant_brut: number;
-  montant_retenu: number;
-  montant_net: number;
-
-  enseignant_ok: boolean;
-  cycle_matiere_ok: boolean;
-  global_ok: boolean;
-
-  message: string;
-}
-// ================= BUILD BACKEND PAYLOAD =================
-const buildBackendPayload = (formData: VacationInput) => {
-  return {
-    enseignant_id: formData.enseignant_id,
-    matiere_id: formData.matiere_id,
-    promotion_id: formData.promotion_id,
-    annee_scolaire_id: Number(formData.annee_scolaire),
-    nb_classe: formData.nb_classe ?? 0,
-    mois: Number(formData.mois),
-    annee: formData.annee,
-  };
-};
-
 // ================= CONSTANTES =================
 const MOIS_OPTIONS = [
   { value: '1', label: 'Janvier' }, { value: '2', label: 'Février' },
@@ -171,8 +148,11 @@ const MOIS_OPTIONS = [
   { value: '11', label: 'Novembre' }, { value: '12', label: 'Décembre' }
 ];
 
+const ANNEES_OPTIONS = [2024, 2025, 2026, 2027, 2028].map(a => ({ value: String(a), label: String(a) }));
+
 // ================= COMPOSANT PRINCIPAL =================
 export default function VacationsManager() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   // États du formulaire
@@ -181,15 +161,29 @@ export default function VacationsManager() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [viewItem, setViewItem] = useState<VacationResponse | null>(null);
   const [showFilters, setShowFilters] = useState(false);
-  const [calculating, setCalculating] = useState(false);
-  const [calculatedValues, setCalculatedValues] = useState<VacationCalculated | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // États de recherche et pagination
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState('20');
 
-  // État du formulaire
+  // État pour stocker le vhoraire de la matière sélectionnée
+  const [selectedVhoraire, setSelectedVhoraire] = useState(0);
+
+  // ============================================================
+  // ÉTATS DES FILTRES
+  // ============================================================
+  const [filterMois, setFilterMois] = useState<string | null>(null);
+  const [filterAnnee, setFilterAnnee] = useState<string | null>(String(new Date().getFullYear()));
+  const [filterAnneeScolaire, setFilterAnneeScolaire] = useState<string | null>(null);
+  const [filterPromotion, setFilterPromotion] = useState<string | null>(null);
+  const [filterEnseignant, setFilterEnseignant] = useState<string | null>(null);
+  const [filterCycle, setFilterCycle] = useState<string | null>(null);
+  const [filterModule, setFilterModule] = useState<string | null>(null);
+  const [filterMatiere, setFilterMatiere] = useState<string | null>(null);
+
+  // État du formulaire pour la création/modification
   const [formData, setFormData] = useState<VacationInput>({
     enseignant_id: 0,
     cycle_id: 0,
@@ -203,6 +197,248 @@ export default function VacationsManager() {
     annee_scolaire: '',
     promotion_id: 0,
   });
+
+  // ============================================================
+  // FONCTIONS D'EXPORT
+  // ============================================================
+
+  const formatNumber = (value: number | null | undefined): string => {
+    return (value ?? 0).toLocaleString();
+  };
+
+  // Générer l'état de liquidation
+  const generateEtatLiquidation = () => {
+    const mois = filterMois || formData.mois;
+    const annee = filterAnnee || String(formData.annee);
+    
+    if (!mois || !annee) {
+      alert("Veuillez sélectionner un mois et une année");
+      return;
+    }
+    
+    navigate(`/etat?mois=${mois}&annee=${annee}`);
+  };
+
+  // Export Excel
+  const exportToExcel = async () => {
+    try {
+      setExporting(true);
+      
+      const filePath = await save({
+        filters: [{ name: 'Excel Files', extensions: ['xlsx'] }],
+        defaultPath: `vacations_${new Date().toISOString().split('T')[0]}.xlsx`
+      });
+
+      if (!filePath) return;
+
+      const data = filteredVacations.map(v => ({
+        'ID': v.id,
+        'Enseignant': `${v.nomEnseignant} ${v.prenomEnseignant}`,
+        'Cycle': v.libelleCycle,
+        'Module': v.libelleModule,
+        'Matière': v.libelleMatiere,
+        'Classes': v.nbClasse,
+        'VHT': v.vht,
+        'Montant net': v.montantNet,
+        'Mois': MOIS_OPTIONS.find(m => m.value === v.mois)?.label,
+        'Année': v.annee,
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Vacations');
+      
+      ws['!cols'] = [{ wch: 8 }, { wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 18 }, { wch: 12 }, { wch: 8 }];
+
+      const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      await writeFile(filePath, new Uint8Array(excelBuffer));
+      
+      alert(`✅ Export Excel réussi !`);
+    } catch (error) {
+      console.error('Erreur export Excel:', error);
+      alert('❌ Erreur lors de l\'export Excel');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Export PDF
+  const exportToPDF = async () => {
+    try {
+      setExporting(true);
+      
+      const filePath = await save({
+        filters: [{ name: 'PDF Files', extensions: ['pdf'] }],
+        defaultPath: `vacations_${new Date().toISOString().split('T')[0]}.pdf`
+      });
+
+      if (!filePath) return;
+
+      const doc = new jsPDF('landscape', 'mm', 'a4');
+      
+      doc.setFontSize(18);
+      doc.text('Liste des Vacations', 14, 15);
+      doc.setFontSize(10);
+      doc.text(`Généré le : ${new Date().toLocaleString('fr-FR')}`, 14, 25);
+      doc.text(`Total : ${filteredVacations.length} vacation(s)`, 14, 32);
+
+      const tableData = filteredVacations.map(v => [
+        v.id.toString(),
+        `${v.nomEnseignant} ${v.prenomEnseignant}`,
+        v.libelleCycle || '',
+        v.libelleMatiere || '',
+        `${v.vht?.toFixed(1)}h`,
+        `${formatNumber(v.montantNet)} F`,
+      ]);
+
+      doc.autoTable({
+        head: [['ID', 'Enseignant', 'Cycle', 'Matière', 'VHT', 'Net']],
+        body: tableData,
+        startY: 40,
+        theme: 'striped',
+        headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 2 },
+      });
+
+      const pdfBuffer = doc.output('arraybuffer');
+      await writeFile(filePath, new Uint8Array(pdfBuffer));
+      
+      alert(`✅ Export PDF réussi !`);
+    } catch (error) {
+      console.error('Erreur export PDF:', error);
+      alert('❌ Erreur lors de l\'export PDF');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Export Word
+  const exportToWord = async () => {
+    try {
+      setExporting(true);
+      
+      const filePath = await save({
+        filters: [{ name: 'Word Files', extensions: ['doc'] }],
+        defaultPath: `vacations_${new Date().toISOString().split('T')[0]}.doc`
+      });
+
+      if (!filePath) return;
+
+      const rows = filteredVacations.map(v => `
+        <tr>
+          <td>${v.id}</td>
+          <td>${v.nomEnseignant} ${v.prenomEnseignant}</td>
+          <td>${v.libelleCycle || ''}</td>
+          <td>${v.libelleMatiere || ''}</td>
+          <td>${v.vht?.toFixed(1)}h</td>
+          <td>${formatNumber(v.montantNet)} F</td>
+        </tr>
+      `).join('');
+
+      const htmlContent = `<!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"><title>Liste des Vacations</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        h1 { color: #2980b9; border-bottom: 2px solid #2980b9; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { background-color: #2980b9; color: white; padding: 10px; border: 1px solid #ddd; }
+        td { padding: 8px; border: 1px solid #ddd; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+      </style>
+      </head>
+      <body>
+        <h1>📋 Liste des Vacations</h1>
+        <p>Date: ${new Date().toLocaleString('fr-FR')}</p>
+        <p>Total: ${filteredVacations.length} vacation(s)</p>
+        <table>
+          <thead><tr><th>ID</th><th>Enseignant</th><th>Cycle</th><th>Matière</th><th>VHT</th><th>Net</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </body>
+      </html>`;
+
+      const encoder = new TextEncoder();
+      await writeFile(filePath, encoder.encode(htmlContent));
+      
+      alert(`✅ Export Word réussi !`);
+    } catch (error) {
+      console.error('Erreur export Word:', error);
+      alert('❌ Erreur lors de l\'export Word');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Impression
+  const handlePrint = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Veuillez autoriser les pop-ups pour cette application");
+      return;
+    }
+
+    const rows = filteredVacations.map(v => `
+      <tr>
+        <td>${v.id}</td>
+        <td>${v.nomEnseignant} ${v.prenomEnseignant}</td>
+        <td>${v.libelleCycle || ''}</td>
+        <td>${v.libelleMatiere || ''}</td>
+        <td>${v.vht?.toFixed(1)}h</td>
+        <td>${formatNumber(v.montantNet)} F</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"><title>Liste des Vacations</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #2980b9; border-bottom: 2px solid #2980b9; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { background-color: #2980b9; color: white; padding: 10px; border: 1px solid #ddd; }
+        td { padding: 8px; border: 1px solid #ddd; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        @media print { .no-print { display: none; } }
+      </style>
+      </head>
+      <body>
+        <h1>📋 Liste des Vacations</h1>
+        <p>Date: ${new Date().toLocaleString('fr-FR')}</p>
+        <p>Total: ${filteredVacations.length} vacation(s)</p>
+        <table>
+          <thead><tr><th>ID</th><th>Enseignant</th><th>Cycle</th><th>Matière</th><th>VHT</th><th>Net</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="no-print" style="text-align: center; margin-top: 20px;">
+          <button onclick="window.print();">🖨️ Imprimer</button>
+          <button onclick="window.close();">❌ Fermer</button>
+        </div>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  // ============================================================
+  // FONCTION UTILITAIRE POUR CONSTRUIRE LE PAYLOAD
+  // ============================================================
+  const buildPayload = (data: VacationInput) => {
+    return {
+      enseignant_id: data.enseignant_id,
+      matiere_id: data.matiere_id,
+      promotion_id: data.promotion_id,
+      annee_scolaire_id: Number(data.annee_scolaire),
+      nb_classe: data.nb_classe ?? 0,
+      mois: Number(data.mois),
+      annee: data.annee,
+      cycle_id: data.cycle_id,
+      module_id: data.module_id,
+      taux_horaire: data.taux_horaire ?? 5000,
+      taux_retenue: data.taux_retenue ?? 2,
+    };
+  };
 
   // ============================================================
   // RÉCUPÉRATION DES DONNÉES RÉFÉRENTIELLES
@@ -246,13 +482,8 @@ export default function VacationsManager() {
     queryKey: ['vacations'],
     queryFn: async () => {
       try {
-        console.log("TEST INVOKE...");
         const result = await invoke('get_vacations');
-        console.log("VACATIONS OK:", result);
-        if (!Array.isArray(result)) {
-          console.warn("RESULT N'EST PAS UN TABLEAU:", result);
-          return [];
-        }
+        if (!Array.isArray(result)) return [];
         return result;
       } catch (e) {
         console.error("ERREUR BACKEND:", e);
@@ -262,18 +493,68 @@ export default function VacationsManager() {
   });
 
   // ============================================================
-  // FILTRAGE ET PAGINATION
+  // FILTRAGE AVANCÉ
   // ============================================================
 
   const filteredVacations = useMemo(() => {
-    if (!searchTerm) return vacations;
-    const search = searchTerm.toLowerCase();
-    return vacations.filter(v =>
-      v.nom_enseignant?.toLowerCase().includes(search) ||
-      v.prenom_enseignant?.toLowerCase().includes(search) ||
-      v.libelle_matiere?.toLowerCase().includes(search)
-    );
-  }, [vacations, searchTerm]);
+    let filtered = [...vacations];
+
+    // Filtre par recherche textuelle
+    if (searchTerm) {
+      const search = searchTerm.toLowerCase();
+      filtered = filtered.filter(v =>
+        v.nomEnseignant?.toLowerCase().includes(search) ||
+        v.prenomEnseignant?.toLowerCase().includes(search) ||
+        v.libelleMatiere?.toLowerCase().includes(search)
+      );
+    }
+
+    // Filtre par mois
+    if (filterMois) {
+      filtered = filtered.filter(v => v.mois === filterMois);
+    }
+
+    // Filtre par année
+    if (filterAnnee) {
+      filtered = filtered.filter(v => v.annee === parseInt(filterAnnee));
+    }
+
+    // Filtre par année scolaire
+    if (filterAnneeScolaire) {
+      filtered = filtered.filter(v => v.anneeScolaire === filterAnneeScolaire);
+    }
+
+    // Filtre par promotion
+    if (filterPromotion) {
+      filtered = filtered.filter(v => v.libellePromotion === filterPromotion);
+    }
+
+    // Filtre par enseignant
+    if (filterEnseignant) {
+      const enseignantId = parseInt(filterEnseignant);
+      filtered = filtered.filter(v => v.enseignantId === enseignantId);
+    }
+
+    // Filtre par cycle
+    if (filterCycle) {
+      const cycleId = parseInt(filterCycle);
+      filtered = filtered.filter(v => v.cycleId === cycleId);
+    }
+
+    // Filtre par module
+    if (filterModule) {
+      const moduleId = parseInt(filterModule);
+      filtered = filtered.filter(v => v.moduleId === moduleId);
+    }
+
+    // Filtre par matière
+    if (filterMatiere) {
+      const matiereId = parseInt(filterMatiere);
+      filtered = filtered.filter(v => v.matiereId === matiereId);
+    }
+
+    return filtered;
+  }, [vacations, searchTerm, filterMois, filterAnnee, filterAnneeScolaire, filterPromotion, filterEnseignant, filterCycle, filterModule, filterMatiere]);
 
   const totalItems = filteredVacations.length;
   const totalPages = Math.ceil(totalItems / parseInt(itemsPerPage));
@@ -287,16 +568,12 @@ export default function VacationsManager() {
   // ============================================================
 
   const stats = useMemo(() => {
-    const totalBrut = paginatedVacations.reduce((sum, v) => sum + (v.montant_brut ?? 0), 0);
-    const totalRetenu = paginatedVacations.reduce((sum, v) => sum + (v.montant_retenu ?? 0), 0);
-    const totalNet = paginatedVacations.reduce((sum, v) => sum + (v.montant_net ?? 0), 0);
-    const totalHours = paginatedVacations.reduce((sum, v) => sum + (v.vht ?? 0), 0);
+    const totalBrut = filteredVacations.reduce((sum, v) => sum + (v.montantBrut ?? 0), 0);
+    const totalRetenu = filteredVacations.reduce((sum, v) => sum + (v.montantRetenu ?? 0), 0);
+    const totalNet = filteredVacations.reduce((sum, v) => sum + (v.montantNet ?? 0), 0);
+    const totalHours = filteredVacations.reduce((sum, v) => sum + (v.vht ?? 0), 0);
     return { totalBrut, totalRetenu, totalNet, totalHours, count: totalItems };
-  }, [paginatedVacations, totalItems]);
-
-  const formatNumber = (value: number | null | undefined): string => {
-    return (value ?? 0).toLocaleString();
-  };
+  }, [filteredVacations]);
 
   // ============================================================
   // MUTATIONS CRUD
@@ -304,22 +581,30 @@ export default function VacationsManager() {
 
   const createMutation = useMutation({
     mutationFn: (data: VacationInput) =>
-      invoke('create_vacation', { input: buildBackendPayload(data) }),
+      invoke('create_vacation', { input: buildPayload(data) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vacations'] });
       setModalOpened(false);
       resetForm();
     },
+    onError: (error: any) => {
+      console.error("Erreur création:", error);
+      alert(`Erreur: ${error.message || "Impossible de créer la vacation"}`);
+    }
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, ...data }: { id: number } & VacationInput) =>
-      invoke('update_vacation', { id, input: buildBackendPayload(data) }),
+      invoke('update_vacation', { id, input: buildPayload(data) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vacations'] });
       setModalOpened(false);
       resetForm();
     },
+    onError: (error: any) => {
+      console.error("Erreur modification:", error);
+      alert(`Erreur: ${error.message || "Impossible de modifier la vacation"}`);
+    }
   });
 
   const deleteMutation = useMutation({
@@ -328,6 +613,10 @@ export default function VacationsManager() {
       queryClient.invalidateQueries({ queryKey: ['vacations'] });
       setDeleteId(null);
     },
+    onError: (error: any) => {
+      console.error("Erreur suppression:", error);
+      alert(`Erreur: ${error.message || "Impossible de supprimer la vacation"}`);
+    }
   });
 
   // ============================================================
@@ -336,6 +625,7 @@ export default function VacationsManager() {
 
   const resetForm = () => {
     setEditingId(null);
+    setSelectedVhoraire(0);
     setFormData({
       enseignant_id: 0,
       cycle_id: 0,
@@ -349,7 +639,6 @@ export default function VacationsManager() {
       annee_scolaire: anneesScolaires[0]?.id.toString() || '',
       promotion_id: 0,
     });
-    setCalculatedValues(null);
   };
 
   const openCreateModal = () => {
@@ -359,75 +648,54 @@ export default function VacationsManager() {
 
   const openEditModal = (item: VacationResponse) => {
     setEditingId(item.id);
+    setSelectedVhoraire(item.vhoraireMatiere || 0);
     setFormData({
-      enseignant_id: item.enseignant_id,
-      cycle_id: item.cycle_id,
-      module_id: item.module_id,
-      matiere_id: item.matiere_id,
-      nb_classe: item.nb_classe,
-      taux_horaire: item.taux_horaire,
-      taux_retenue: item.taux_retenue,
+      enseignant_id: item.enseignantId,
+      cycle_id: item.cycleId,
+      module_id: item.moduleId,
+      matiere_id: item.matiereId,
+      nb_classe: item.nbClasse,
+      taux_horaire: item.tauxHoraire,
+      taux_retenue: item.tauxRetenue,
       mois: item.mois,
       annee: item.annee,
-      annee_scolaire: item.annee_scolaire,
-      promotion_id: item.promotion_id,
+      annee_scolaire: item.anneeScolaire,
+      promotion_id: item.promotionId,
     });
     setModalOpened(true);
   };
 
-  // ============================================================
-  // CALCUL DES MONTANTS
-  // ============================================================
-
-  const handleCalculate = async () => {
-    if (
-      formData.enseignant_id === 0 ||
-      formData.matiere_id === 0 ||
-      !formData.nb_classe ||
-      !formData.annee_scolaire
-    ) return;
-
-    setCalculating(true);
-
-    try {
-      const buildBackendPayload = (formData: VacationInput) => {
-        const payload = {
-          enseignant_id: formData.enseignant_id,
-          matiere_id: formData.matiere_id,
-          promotion_id: formData.promotion_id,
-          annee_scolaire_id: Number(formData.annee_scolaire),
-          nb_classe: formData.nb_classe ?? 0,
-          mois: Number(formData.mois),
-          annee: formData.annee,
-          // AJOUTER cycle_id et module_id
-          cycle_id: formData.cycle_id,
-          module_id: formData.module_id,
-        };
-        console.log("📦 Payload construit:", payload);
-        return payload;
-      };
-      const result = await invoke<VacationCalculated>("calculate_vacation", { input: payload });
-      setCalculatedValues(result);
-    } catch (e) {
-      console.error("Erreur calcul:", e);
-    } finally {
-      setCalculating(false);
-    }
-  };
-
-  // ============================================================
-  // SOUMISSION DU FORMULAIRE
-  // ============================================================
-
   const handleSubmit = () => {
-    if (
-      formData.enseignant_id === 0 ||
-      formData.matiere_id === 0 ||
-      !formData.nb_classe ||
-      formData.nb_classe < 1 ||
-      formData.promotion_id === 0 ||
-      !formData.annee_scolaire
-    ) {
+    if (!formData.enseignant_id) {
+      alert("Veuillez sélectionner un enseignant");
+      return;
+    }
+    if (!formData.cycle_id) {
+      alert("Veuillez sélectionner un cycle");
+      return;
+    }
+    if (!formData.module_id) {
+      alert("Veuillez sélectionner un module");
+      return;
+    }
+    if (!formData.matiere_id) {
+      alert("Veuillez sélectionner une matière");
+      return;
+    }
+    if (!formData.nb_classe || formData.nb_classe < 1) {
+      alert("Veuillez saisir un nombre de classes valide");
+      return;
+    }
+    if (!formData.promotion_id) {
+      alert("Veuillez sélectionner une promotion");
+      return;
+    }
+    if (!formData.annee_scolaire) {
+      alert("Veuillez sélectionner une année scolaire");
+      return;
+    }
+    if (!formData.mois) {
+      alert("Veuillez sélectionner un mois");
       return;
     }
 
@@ -436,6 +704,19 @@ export default function VacationsManager() {
     } else {
       createMutation.mutate(formData);
     }
+  };
+
+  const resetFilters = () => {
+    setFilterMois(null);
+    setFilterAnnee(String(new Date().getFullYear()));
+    setFilterAnneeScolaire(null);
+    setFilterPromotion(null);
+    setFilterEnseignant(null);
+    setFilterCycle(null);
+    setFilterModule(null);
+    setFilterMatiere(null);
+    setSearchTerm('');
+    setCurrentPage(1);
   };
 
   // ============================================================
@@ -473,12 +754,44 @@ export default function VacationsManager() {
           <Stack gap={2}>
             <Title order={2} c="white">Gestion des Vacations</Title>
             <Text size="sm" c="gray.3">
-              {stats.count} vacation{stats.count > 1 ? 's' : ''} enregistrée{stats.count > 1 ? 's' : ''}
+              {stats.count} vacation{stats.count > 1 ? 's' : ''} trouvée{stats.count > 1 ? 's' : ''}
             </Text>
           </Stack>
-          <ThemeIcon size={48} radius="md" color="white" variant="light">
-            <IconCalendar size={28} />
-          </ThemeIcon>
+          <Group>
+            <Button
+              leftSection={<IconFileText size={16} />}
+              onClick={generateEtatLiquidation}
+              variant="outline"
+              color="teal"
+            >
+              État de liquidation
+            </Button>
+            <Menu shadow="md" width={200}>
+              <Menu.Target>
+                <Button leftSection={<IconDownload size={16} />} variant="outline" color="white" loading={exporting}>
+                  Exporter
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Label>Choisir le format</Menu.Label>
+                <Menu.Item leftSection={<IconFileExcel size={16} color="#00a84f" />} onClick={exportToExcel}>
+                  Excel (.xlsx)
+                </Menu.Item>
+                <Menu.Item leftSection={<IconFile size={16} color="#e74c3c" />} onClick={exportToPDF}>
+                  PDF (.pdf)
+                </Menu.Item>
+                <Menu.Item leftSection={<IconFileWord size={16} color="#2980b9" />} onClick={exportToWord}>
+                  Word (.doc)
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+            <Button leftSection={<IconPrinter size={16} />} onClick={handlePrint} variant="outline" color="white">
+              Imprimer
+            </Button>
+            <ThemeIcon size={48} radius="md" color="white" variant="light">
+              <IconCalendar size={28} />
+            </ThemeIcon>
+          </Group>
         </Group>
       </Card>
 
@@ -505,65 +818,129 @@ export default function VacationsManager() {
       {/* CONTENU PRINCIPAL */}
       <Card withBorder radius="md" p="lg">
         <Stack gap="md">
-          {/* EN-TÊTE DU CARD */}
+          {/* EN-TÊTE */}
           <Group justify="space-between" align="flex-end">
             <div>
               <Title order={4}>Liste des vacations</Title>
-              <Text size="sm" c="dimmed">
-                Gérez les paiements des enseignants par vacation
-              </Text>
+              <Text size="sm" c="dimmed">Gérez les paiements des enseignants par vacation</Text>
             </div>
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={openCreateModal}
-              variant="gradient"
-              gradient={{ from: 'blue', to: 'cyan' }}
-            >
+            <Button leftSection={<IconPlus size={16} />} onClick={openCreateModal} variant="gradient" gradient={{ from: 'blue', to: 'cyan' }}>
               Nouvelle vacation
             </Button>
           </Group>
 
           <Divider />
 
-          {/* RECHERCHE ET FILTRES */}
-          <Group grow>
-            <TextInput
-              placeholder="Rechercher un enseignant ou une matière..."
-              leftSection={<IconSearch size={16} />}
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-            />
-            <Button
-              variant="light"
-              onClick={() => setShowFilters(!showFilters)}
-              leftSection={<IconFilter size={16} />}
-            >
-              Filtres
-            </Button>
-          </Group>
+          {/* RECHERCHE RAPIDE */}
+          <TextInput
+            placeholder="Rechercher un enseignant ou une matière..."
+            leftSection={<IconSearch size={16} />}
+            value={searchTerm}
+            onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+          />
 
+          {/* BOUTON FILTRES AVANCÉS */}
+          <Button variant="light" onClick={() => setShowFilters(!showFilters)} leftSection={<IconFilter size={16} />}>
+            {showFilters ? "Masquer les filtres" : "Afficher les filtres avancés"}
+          </Button>
+
+          {/* FILTRES AVANCÉS */}
           <Collapse in={showFilters}>
-            <Grid>
-              <Grid.Col span={6}>
-                <MultiSelect
-                  label="Cycles"
-                  data={cycles.map(c => ({ value: String(c.id), label: c.designation }))}
-                  placeholder="Filtrer par cycles"
-                  clearable
-                />
-              </Grid.Col>
-              <Grid.Col span={6}>
-                <MultiSelect
-                  label="Modules"
-                  data={modules.map(m => ({ value: String(m.id), label: m.designation }))}
-                  placeholder="Filtrer par modules"
-                  clearable
-                />
-              </Grid.Col>
-            </Grid>
+            <Card withBorder p="md" radius="md">
+              <Grid gutter="md">
+                <Grid.Col span={3}>
+                  <Select
+                    label="Mois"
+                    placeholder="Tous les mois"
+                    data={MOIS_OPTIONS}
+                    value={filterMois}
+                    onChange={setFilterMois}
+                    clearable
+                  />
+                </Grid.Col>
+                <Grid.Col span={3}>
+                  <Select
+                    label="Année"
+                    placeholder="Toutes les années"
+                    data={ANNEES_OPTIONS}
+                    value={filterAnnee}
+                    onChange={setFilterAnnee}
+                    clearable
+                  />
+                </Grid.Col>
+                <Grid.Col span={3}>
+                  <Select
+                    label="Année scolaire"
+                    placeholder="Toutes les années"
+                    data={anneesScolaires.map(a => ({ value: a.libelle, label: a.libelle }))}
+                    value={filterAnneeScolaire}
+                    onChange={setFilterAnneeScolaire}
+                    clearable
+                    searchable
+                  />
+                </Grid.Col>
+                <Grid.Col span={3}>
+                  <Select
+                    label="Promotion"
+                    placeholder="Toutes les promotions"
+                    data={promotions.map(p => ({ value: p.libelle, label: p.libelle }))}
+                    value={filterPromotion}
+                    onChange={setFilterPromotion}
+                    clearable
+                    searchable
+                  />
+                </Grid.Col>
+                <Grid.Col span={3}>
+                  <Select
+                    label="Enseignant"
+                    placeholder="Tous les enseignants"
+                    data={enseignants.map(e => ({ value: String(e.id), label: `${e.nom} ${e.prenom}` }))}
+                    value={filterEnseignant}
+                    onChange={setFilterEnseignant}
+                    clearable
+                    searchable
+                  />
+                </Grid.Col>
+                <Grid.Col span={3}>
+                  <Select
+                    label="Cycle"
+                    placeholder="Tous les cycles"
+                    data={cycles.map(c => ({ value: String(c.id), label: c.designation }))}
+                    value={filterCycle}
+                    onChange={setFilterCycle}
+                    clearable
+                    searchable
+                  />
+                </Grid.Col>
+                <Grid.Col span={3}>
+                  <Select
+                    label="Module"
+                    placeholder="Tous les modules"
+                    data={modules.filter(m => !filterCycle || m.cycle_id === parseInt(filterCycle)).map(m => ({ value: String(m.id), label: m.designation }))}
+                    value={filterModule}
+                    onChange={setFilterModule}
+                    clearable
+                    searchable
+                    disabled={!filterCycle}
+                  />
+                </Grid.Col>
+                <Grid.Col span={3}>
+                  <Select
+                    label="Matière"
+                    placeholder="Toutes les matières"
+                    data={matieres.filter(m => !filterModule || m.module_id === parseInt(filterModule)).map(m => ({ value: String(m.id), label: m.designation }))}
+                    value={filterMatiere}
+                    onChange={setFilterMatiere}
+                    clearable
+                    searchable
+                    disabled={!filterModule}
+                  />
+                </Grid.Col>
+              </Grid>
+              <Group justify="flex-end" mt="md">
+                <Button variant="light" onClick={resetFilters} size="sm">Réinitialiser les filtres</Button>
+              </Group>
+            </Card>
           </Collapse>
 
           {/* TABLEAU DES VACATIONS */}
@@ -573,61 +950,57 @@ export default function VacationsManager() {
             </Alert>
           ) : (
             <>
-              <ScrollArea style={{ maxHeight: 500 }}>
-                <Table striped highlightOnHover>
+              <ScrollArea style={{ maxHeight: 600 }}>
+                <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
                   <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>Enseignant</Table.Th>
-                      <Table.Th>Cycle</Table.Th>
-                      <Table.Th>Matière</Table.Th>
-                      <Table.Th>Heures</Table.Th>
-                      <Table.Th>Brut</Table.Th>
-                      <Table.Th>Net</Table.Th>
-                      <Table.Th>Période</Table.Th>
-                      <Table.Th style={{ width: 100, textAlign: 'center' }}>Actions</Table.Th>
+                    <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+                      <Table.Th style={{ color: 'white', padding: '12px 16px' }}>Enseignant</Table.Th>
+                      <Table.Th style={{ color: 'white', padding: '12px 16px' }}>Cycle</Table.Th>
+                      <Table.Th style={{ color: 'white', padding: '12px 16px' }}>Module</Table.Th>
+                      <Table.Th style={{ color: 'white', padding: '12px 16px' }}>Matière</Table.Th>
+                      <Table.Th style={{ color: 'white', padding: '12px 16px' }}>Classes</Table.Th>
+                      <Table.Th style={{ color: 'white', padding: '12px 16px' }}>Net</Table.Th>
+                      <Table.Th style={{ color: 'white', padding: '12px 16px', textAlign: 'center' }}>Actions</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
                     {paginatedVacations.map((item) => (
                       <Table.Tr key={item.id}>
-                        <Table.Td>
-                          <Text size="sm" fw={500}>
-                            {item.nom_enseignant} {item.prenom_enseignant}
-                          </Text>
+                        <Table.Td style={{ padding: '12px 16px' }}>
+                          <Text fw={500} size="sm">{item.nomEnseignant} {item.prenomEnseignant}</Text>
                         </Table.Td>
-                        <Table.Td>
-                          <Badge color="blue" variant="light" size="sm">
-                            {item.libelle_cycle}
-                          </Badge>
+                        <Table.Td style={{ padding: '12px 16px' }}>
+                          <Badge color="blue" variant="light" size="sm">{item.libelleCycle}</Badge>
                         </Table.Td>
-                        <Table.Td>
-                          <Text size="sm">{item.libelle_matiere}</Text>
+                        <Table.Td style={{ padding: '12px 16px' }}>
+                          <Text size="sm">{item.libelleModule}</Text>
                         </Table.Td>
-                        <Table.Td>
-                          <Text size="sm" fw={500}>{(item.vht ?? 0).toFixed(1)}h</Text>
+                        <Table.Td style={{ padding: '12px 16px' }}>
+                          <Text size="sm" fw={500}>{item.libelleMatiere}</Text>
                         </Table.Td>
-                        <Table.Td>
-                          <Text size="sm">{formatNumber(item.montant_brut)} F</Text>
+                        <Table.Td style={{ padding: '12px 16px' }}>
+                          <Badge color="gray" variant="light" size="sm">{item.nbClasse}</Badge>
                         </Table.Td>
-                        <Table.Td>
-                          <Text size="sm" fw={700} c="blue">{formatNumber(item.montant_net)} F</Text>
+                        <Table.Td style={{ padding: '12px 16px' }}>
+                          <Text fw={700} c="green" size="sm">{formatNumber(item.montantNet)} FCFA</Text>
                         </Table.Td>
-                        <Table.Td>
-                          <Text size="sm">
-                            {MOIS_OPTIONS.find(m => m.value === item.mois)?.label} {item.annee}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
+                        <Table.Td style={{ padding: '12px 16px', textAlign: 'center' }}>
                           <Group gap="xs" justify="center">
-                            <ActionIcon variant="subtle" color="blue" onClick={() => openEditModal(item)}>
-                              <IconEdit size={16} />
-                            </ActionIcon>
-                            <ActionIcon variant="subtle" color="red" onClick={() => setDeleteId(item.id)}>
-                              <IconTrash size={16} />
-                            </ActionIcon>
-                            <ActionIcon variant="subtle" color="gray" onClick={() => setViewItem(item)}>
-                              <IconEye size={16} />
-                            </ActionIcon>
+                            <Tooltip label="Voir détails">
+                              <ActionIcon variant="subtle" color="blue" onClick={() => setViewItem(item)} size="sm">
+                                <IconEye size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="Modifier">
+                              <ActionIcon variant="subtle" color="yellow" onClick={() => openEditModal(item)} size="sm">
+                                <IconEdit size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="Supprimer">
+                              <ActionIcon variant="subtle" color="red" onClick={() => setDeleteId(item.id)} size="sm">
+                                <IconTrash size={16} />
+                              </ActionIcon>
+                            </Tooltip>
                           </Group>
                         </Table.Td>
                       </Table.Tr>
@@ -641,10 +1014,7 @@ export default function VacationsManager() {
                 <Group justify="space-between" mt="md">
                   <Select
                     value={itemsPerPage}
-                    onChange={(val) => {
-                      setItemsPerPage(val || '20');
-                      setCurrentPage(1);
-                    }}
+                    onChange={(val) => { setItemsPerPage(val || '20'); setCurrentPage(1); }}
                     data={['10', '20', '50', '100']}
                     style={{ width: 100 }}
                   />
@@ -663,336 +1033,46 @@ export default function VacationsManager() {
         </Stack>
       </Card>
 
-      {/* ================================================================ */}
-      {/* MODAL D'AJOUT / MODIFICATION - AVEC FLUX DE TRAVAIL EXPLIQUÉ */}
-      {/* ================================================================ */}
-
-      <Modal
-        opened={modalOpened}
-        onClose={() => {
-          setModalOpened(false);
-          resetForm();
-        }}
-        title={editingId ? "Modifier la vacation" : "Nouvelle vacation"}
-        size="xl"
-      >
-        <Stack gap="md">
-          {/* 
-            ============================================================
-            FLUX DE TRAVAIL POUR LA CRÉATION D'UNE VACATION
-            ============================================================
-            
-            Étape 1 : Sélectionner un enseignant → Badge avec statut affiché
-            Étape 2 : Sélectionner un cycle → Filtre les modules disponibles
-            Étape 3 : Sélectionner un module → Filtre les matières disponibles
-            Étape 4 : Sélectionner une matière → VH (Volume Horaire) affiché automatiquement
-            Étape 5 : Choisir promotion, nombre de classes, période → Calculs mis à jour en temps réel
-            Étape 6 : (Optionnel) Cliquer "Calculer" → Validation supplémentaire
-            Étape 7 : Cliquer "Enregistrer" → Sauvegarde (si VH suffisant)
-            
-            💡 Le calcul est automatique et en temps réel, 
-               donc pas besoin de cliquer sur "Calculer" avant d'enregistrer !
-            
-            ============================================================
-          */}
-
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            {/* Étape 1 : Enseignant */}
-            <Select
-              label="1. Enseignant"
-              placeholder="Sélectionnez un enseignant"
-              data={enseignants.map(e => ({ value: String(e.id), label: `${e.nom} ${e.prenom}` }))}
-              value={String(formData.enseignant_id || '')}
-              onChange={(val) => setFormData({ ...formData, enseignant_id: parseInt(val || '0') })}
-              withAsterisk
-            />
-
-            {/* Étape 2 : Cycle */}
-            <Select
-              label="2. Cycle"
-              placeholder="Sélectionnez un cycle"
-              data={cycles.map(c => ({ value: String(c.id), label: c.designation }))}
-              value={String(formData.cycle_id || '')}
-              onChange={(val) => {
-                const cycleId = parseInt(val || '0');
-                setFormData({
-                  ...formData,
-                  cycle_id: cycleId,
-                  module_id: 0,
-                  matiere_id: 0
-                });
-              }}
-              withAsterisk
-            />
-
-            {/* Étape 3 : Module */}
-            <Select
-              label="3. Module"
-              placeholder="Sélectionnez un module"
-              data={modules
-                .filter(m => m.cycle_id === formData.cycle_id)
-                .map(m => ({ value: String(m.id), label: m.designation }))}
-              value={String(formData.module_id || '')}
-              onChange={(val) => {
-                const moduleId = parseInt(val || '0');
-                setFormData({
-                  ...formData,
-                  module_id: moduleId,
-                  matiere_id: 0
-                });
-              }}
-              withAsterisk
-              disabled={!formData.cycle_id}
-            />
-
-            {/* Étape 4 : Matière */}
-            <Select
-              label="4. Matière"
-              placeholder="Sélectionnez une matière"
-              data={matieres
-                .filter(m => m.module_id === formData.module_id)
-                .map(m => ({ value: String(m.id), label: m.designation }))}
-              value={String(formData.matiere_id || '')}
-              onChange={(val) => setFormData({ ...formData, matiere_id: parseInt(val || '0') })}
-              withAsterisk
-              disabled={!formData.module_id}
-            />
-
-            {/* Étape 5 : Nombre de classes */}
-            <NumberInput
-              label="5. Nombre de classes"
-              placeholder="Ex: 3"
-              value={formData.nb_classe || undefined}
-              onChange={(val) => setFormData({ ...formData, nb_classe: val as number })}
-              min={1}
-              withAsterisk
-            />
-
-            {/* Promotion */}
-            <Select
-              label="Promotion"
-              placeholder="Sélectionnez une promotion"
-              data={promotions.map(p => ({ value: String(p.id), label: p.libelle }))}
-              value={String(formData.promotion_id || '')}
-              onChange={(val) => setFormData({ ...formData, promotion_id: parseInt(val || '0') })}
-              withAsterisk
-            />
-
-            {/* Taux horaire */}
-            <NumberInput
-              label="Taux horaire (F CFA)"
-              value={formData.taux_horaire || undefined}
-              onChange={(val) => setFormData({ ...formData, taux_horaire: val as number })}
-              min={1}
-              withAsterisk
-            />
-
-            {/* Taux de retenue */}
-            <NumberInput
-              label="Taux de retenue (%)"
-              value={formData.taux_retenue || undefined}
-              onChange={(val) => setFormData({ ...formData, taux_retenue: val as number })}
-              min={0}
-              max={100}
-              withAsterisk
-            />
-
-            {/* Mois */}
-            <Select
-              label="Mois"
-              data={MOIS_OPTIONS}
-              value={formData.mois}
-              onChange={(val) => setFormData({ ...formData, mois: val || '1' })}
-              withAsterisk
-            />
-
-            {/* Année */}
-            <NumberInput
-              label="Année"
-              value={formData.annee}
-              onChange={(val) => setFormData({ ...formData, annee: val as number })}
-              min={2000}
-              max={2100}
-              withAsterisk
-            />
-
-            {/* Année scolaire */}
-            <Select
-              label="Année scolaire"
-              data={anneesScolaires.map(a => ({
-                value: String(a.id),
-                label: a.libelle
-              }))}
-              value={formData.annee_scolaire}
-              onChange={(val) => setFormData({ ...formData, annee_scolaire: val || '' })}
-              withAsterisk
-            />
-          </SimpleGrid>
-
-          {/* Aperçu des calculs (Étape 6 - Optionnel mais recommandé) */}
-          {calculatedValues && (
-            <Card withBorder bg="gray.0" p="sm">
-              <Group justify="space-between" mb="xs">
-                <Text fw={700} size="sm">📊 Aperçu du calcul</Text>
-                <Badge color={calculatedValues.global_ok ? "green" : "red"}>
-                  {calculatedValues.global_ok ? "✅ Valide" : "❌ Invalide"}
-                </Badge>
-              </Group>
-              <SimpleGrid cols={3} spacing="xs">
-                <Text size="xs">📚 VHT demandé: {calculatedValues.vht_demande?.toFixed(1)}h</Text>
-                <Text size="xs">💰 Brut: {formatNumber(calculatedValues.montant_brut)} F</Text>
-                <Text size="xs">💵 Net: {formatNumber(calculatedValues.montant_net)} F</Text>
-              </SimpleGrid>
-              {calculatedValues.message && (
-                <Text size="xs" c="dimmed" mt="xs">ℹ️ {calculatedValues.message}</Text>
-              )}
-            </Card>
-          )}
-
-          {/* Message d'information sur le flux de travail */}
-          <Alert color="blue" variant="light" icon={<IconCalculator size={16} />}>
-            <Text size="sm" fw={500}>📋 Flux de travail</Text>
-            <Text size="xs" mt={3}>
-              1. Sélectionner un enseignant → Badge avec statut affiché<br />
-              2. Sélectionner un cycle → Filtre les modules<br />
-              3. Sélectionner un module → Filtre les matières<br />
-              4. Sélectionner une matière → VH affiché automatiquement<br />
-              5. Choisir promotion, nb classes, période → Calculs en temps réel<br />
-              6. (Optionnel) Cliquer "Calculer" → Validation supplémentaire<br />
-              7. Cliquer "Enregistrer" → Sauvegarde (si VH suffisant)<br />
-              <br />
-              💡 <strong>Le calcul est automatique et en temps réel, donc pas besoin de cliquer sur "Calculer" avant d'enregistrer !</strong>
-            </Text>
-          </Alert>
-
-          {/* Boutons d'action */}
-          <Group justify="flex-end" mt="md">
-            <Button variant="light" onClick={handleCalculate} loading={calculating} leftSection={<IconCalculator size={16} />}>
-              {calculatedValues ? "Recalculer" : "Calculer"}
-            </Button>
-            <Button variant="light" onClick={() => setModalOpened(false)}>
-              Annuler
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              loading={createMutation.isPending || updateMutation.isPending}
-              variant="gradient"
-              gradient={{ from: 'blue', to: 'cyan' }}
-            >
-              {editingId ? 'Mettre à jour' : 'Enregistrer'}
-            </Button>
-          </Group>
-        </Stack>
+      {/* MODAL DE VISUALISATION */}
+      <Modal opened={viewItem !== null} onClose={() => setViewItem(null)} title="Détails de la vacation" size="md">
+        {viewItem && (
+          <Stack gap="md">
+            <Group><Text fw={700}>Enseignant:</Text><Text>{viewItem.nomEnseignant} {viewItem.prenomEnseignant}</Text></Group>
+            <Group><Text fw={700}>Matière:</Text><Text>{viewItem.libelleMatiere}</Text></Group>
+            <Group><Text fw={700}>Cycle:</Text><Badge>{viewItem.libelleCycle}</Badge></Group>
+            <Divider />
+            <Group><Text fw={700}>Volume horaire:</Text><Text>{(viewItem.vht ?? 0).toFixed(1)} heures</Text></Group>
+            <Group><Text fw={700}>Montant brut:</Text><Text>{formatNumber(viewItem.montantBrut)} F</Text></Group>
+            <Group><Text fw={700}>Retenue:</Text><Text>{formatNumber(viewItem.montantRetenu)} F</Text></Group>
+            <Group><Text fw={700}>Montant net:</Text><Text fw={700} c="blue">{formatNumber(viewItem.montantNet)} F</Text></Group>
+            <Divider />
+            <Group><Text fw={700}>Période:</Text><Text>{MOIS_OPTIONS.find(m => m.value === viewItem.mois)?.label} {viewItem.annee}</Text></Group>
+            <Group><Text fw={700}>Date de traitement:</Text><Text>{new Date(viewItem.dateTraitement).toLocaleDateString()}</Text></Group>
+          </Stack>
+        )}
       </Modal>
 
       {/* MODAL DE CONFIRMATION SUPPRESSION */}
-      <Modal
-        opened={deleteId !== null}
-        onClose={() => setDeleteId(null)}
-        title="Confirmation"
-        centered
-      >
+      <Modal opened={deleteId !== null} onClose={() => setDeleteId(null)} title="Confirmation" centered>
         <Stack>
           <Text>Êtes-vous sûr de vouloir supprimer cette vacation ?</Text>
           <Text size="sm" c="dimmed">Cette action est irréversible.</Text>
           <Group justify="flex-end" mt="md">
-            <Button variant="light" onClick={() => setDeleteId(null)}>
-              Annuler
-            </Button>
-            <Button
-              color="red"
-              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
-              loading={deleteMutation.isPending}
-            >
-              Supprimer
-            </Button>
+            <Button variant="light" onClick={() => setDeleteId(null)}>Annuler</Button>
+            <Button color="red" onClick={() => deleteId && deleteMutation.mutate(deleteId)} loading={deleteMutation.isPending}>Supprimer</Button>
           </Group>
         </Stack>
-      </Modal>
-
-      {/* MODAL DE VISUALISATION */}
-      <Modal
-        opened={viewItem !== null}
-        onClose={() => setViewItem(null)}
-        title="Détails de la vacation"
-        size="md"
-      >
-        {viewItem && (
-          <Stack gap="md">
-            <Group>
-              <Text fw={700}>Enseignant:</Text>
-              <Text>{viewItem.nom_enseignant} {viewItem.prenom_enseignant}</Text>
-            </Group>
-            <Group>
-              <Text fw={700}>Matière:</Text>
-              <Text>{viewItem.libelle_matiere}</Text>
-            </Group>
-            <Group>
-              <Text fw={700}>Cycle:</Text>
-              <Badge>{viewItem.libelle_cycle}</Badge>
-            </Group>
-            <Divider />
-            <Group>
-              <Text fw={700}>Volume horaire:</Text>
-              <Text>{(viewItem.vht ?? 0).toFixed(1)} heures</Text>
-            </Group>
-            <Group>
-              <Text fw={700}>Montant brut:</Text>
-              <Text>{formatNumber(viewItem.montant_brut)} F</Text>
-            </Group>
-            <Group>
-              <Text fw={700}>Retenue:</Text>
-              <Text>{formatNumber(viewItem.montant_retenu)} F</Text>
-            </Group>
-            <Group>
-              <Text fw={700}>Montant net:</Text>
-              <Text fw={700} c="blue">{formatNumber(viewItem.montant_net)} F</Text>
-            </Group>
-            <Divider />
-            <Group>
-              <Text fw={700}>Période:</Text>
-              <Text>{MOIS_OPTIONS.find(m => m.value === viewItem.mois)?.label} {viewItem.annee}</Text>
-            </Group>
-            <Group>
-              <Text fw={700}>Date de traitement:</Text>
-              <Text>{new Date(viewItem.date_traitement).toLocaleDateString()}</Text>
-            </Group>
-          </Stack>
-        )}
       </Modal>
 
       {/* SECTION INSTRUCTIONS */}
       <Card withBorder radius="md" p="lg">
         <Title order={5} mb="md">📋 Instructions</Title>
         <Stack gap="xs">
-          <Text size="sm">1. Remplissez tous les champs obligatoires pour créer une vacation</Text>
-          <Text size="sm">2. Utilisez le bouton "Calculer" pour prévisualiser les montants</Text>
-          <Text size="sm">3. Les vacations sont calculées automatiquement selon les règles en vigueur</Text>
-          <Text size="sm">4. Consultez l'historique dans le tableau principal</Text>
+          <Text size="sm">1. Utilisez les filtres pour affiner la liste des vacations</Text>
+          <Text size="sm">2. Cliquez sur "État de liquidation" pour générer le document officiel</Text>
+          <Text size="sm">3. Les montants sont calculés automatiquement en temps réel</Text>
+          <Text size="sm">4. Utilisez les boutons d'action pour voir, modifier ou supprimer une vacation</Text>
         </Stack>
-
-        <Divider my="md" />
-
-        <Title order={5} mb="md">📝 Flux de travail détaillé</Title>
-        <Stack gap="xs">
-          <Text size="sm">• <strong>Étape 1:</strong> Sélectionner un enseignant → Badge avec statut affiché</Text>
-          <Text size="sm">• <strong>Étape 2:</strong> Sélectionner un cycle → Filtre les modules disponibles</Text>
-          <Text size="sm">• <strong>Étape 3:</strong> Sélectionner un module → Filtre les matières disponibles</Text>
-          <Text size="sm">• <strong>Étape 4:</strong> Sélectionner une matière → VH (Volume Horaire) affiché automatiquement</Text>
-          <Text size="sm">• <strong>Étape 5:</strong> Choisir promotion, nombre de classes, période → Calculs mis à jour en temps réel</Text>
-          <Text size="sm">• <strong>Étape 6:</strong> (Optionnel) Cliquer "Calculer" → Validation supplémentaire</Text>
-          <Text size="sm">• <strong>Étape 7:</strong> Cliquer "Enregistrer" → Sauvegarde (si VH suffisant)</Text>
-        </Stack>
-
-        <Divider my="md" />
-
-        <Alert color="green" variant="light" icon={<IconCheck size={16} />}>
-          <Text size="sm" fw={500}>💡 Astuce importante</Text>
-          <Text size="xs">
-            Le calcul est automatique et en temps réel, donc pas besoin de cliquer sur "Calculer" avant d'enregistrer !
-            Le bouton "Calculer" sert uniquement à obtenir une validation supplémentaire et un aperçu détaillé.
-          </Text>
-        </Alert>
       </Card>
     </Stack>
   );

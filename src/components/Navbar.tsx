@@ -7,14 +7,13 @@ import {
 } from '@mantine/core';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  IconSettings,
   IconLayoutDashboard,
   IconCalendar,
   IconFileText,
   IconDatabase,
   IconTransfer,
   IconChartBar,
-  IconUpload,
+  
 } from '@tabler/icons-react';
 
 function NavItem({
@@ -106,40 +105,50 @@ export default function Navbar() {
           fw={700}
           size="lg"
           c="yellow"
-          style={{ fontFamily: 'Times New Roman' }}
+          style={{ fontFamily: 'Times New Roman', textAlign: 'center' }}
         >
           ENP VACATIONS
         </Text>
 
         <Divider color={theme.colors.adminBlue?.[6]} />
 
-        {/* MAIN */}
+        {/* SECTION DASHBOARD */}
+        <SectionTitle label="TABLEAU DE BORD" />
         <NavItem
           label="Dashboard"
           path="/"
           icon={<IconLayoutDashboard size={18} />}
         />
+        <Divider color={theme.colors.adminBlue?.[6]} />
+
+        {/* SECTION GESTION DES VACATIONS */}
+        <SectionTitle label="GESTION DES VACATIONS" />
         <NavItem
-          label="Vacations"
+          label="Gestion des vacations"
           path="/vacations"
           icon={<IconCalendar size={18} />}
         />
-        <NavItem
-          label="État liquidation"
-          path="/etat"
-          icon={<IconFileText size={18} />}
-        />
 
-        {/* REFERENTIELS */}
+        <Divider color={theme.colors.adminBlue?.[6]} />
+
+        {/* SECTION RÉFÉRENTIELS */}
         <SectionTitle label="RÉFÉRENTIELS" />
 
         <NavItem
           label="Gestion des référentiels"
-          path="/referents"
+          path="/referentiels"
           icon={<IconDatabase size={18} />}
         />
-        {/* FINANCES */}
-        <SectionTitle label="FINANCES" />
+
+        <Divider color={theme.colors.adminBlue?.[6]} />
+
+        {/* SECTION FINANCES */}
+        <SectionTitle label="Gestion des finances" />
+        <NavItem
+          label="État de liquidation"
+          path="/etat"
+          icon={<IconFileText size={18} />}
+        />
 
         <NavItem
           label="Ordres de virement"
@@ -151,17 +160,21 @@ export default function Navbar() {
           path="/cumuls"
           icon={<IconChartBar size={18} />}
         />
-        <NavItem
-          label="Import Excel"
-          path="/import"
-          icon={<IconUpload size={18} />}
-        />
+
+        <Divider color={theme.colors.adminBlue?.[6]} />
+
       </Stack>
 
       {/* FOOTER */}
-      <Text size="xs" c="dimmed" ta="center">
-        v1.0 • ENP
-      </Text>
+      <Stack gap="xs">
+        <Divider color={theme.colors.adminBlue?.[6]} />
+        <Text size="xs" c="dimmed" ta="center">
+          © 2026 ENP Gestion des Vacations. Tous droits réservés.
+        </Text>
+        <Text size="xs" c="dimmed" ta="center">
+          Version 1.0.0
+        </Text>
+      </Stack>
     </Stack>
   );
 }

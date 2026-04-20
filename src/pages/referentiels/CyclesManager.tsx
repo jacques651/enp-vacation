@@ -326,7 +326,7 @@ export default function CyclesManager() {
         <Stack gap="md">
           <TextInput
             label="Désignation"
-            placeholder="Ex: Premier cycle, Second cycle, Licence..."
+            placeholder="Ex: EL Sous-officiers PN, EL Inspecteurs PM..."
             value={designation}
             onChange={(e) => setDesignation(e.target.value)}
             withAsterisk
@@ -334,7 +334,7 @@ export default function CyclesManager() {
           />
           <NumberInput
             label="Nombre de classes"
-            placeholder="Ex: 6"
+            placeholder="Ex: 2"
             value={nbClasse}
             onChange={(val) => setNbClasse(Number(val))}
             min={1}

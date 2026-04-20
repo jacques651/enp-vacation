@@ -30,10 +30,10 @@ export const theme = createTheme({
     AppShell: {
       styles: {
         main: {
-          backgroundColor: '#f5f7fa', // fond pro
+          backgroundColor: '#f5f7fa',
         },
         navbar: {
-          backgroundColor: '#1b365d', // 🔥 sombre = pro
+          backgroundColor: '#1b365d',
           borderRight: 'none',
         },
       },
@@ -65,6 +65,17 @@ export const theme = createTheme({
       },
     },
 
+    // ✅ CORRECTION : Badge sans majuscules
+    Badge: {
+      styles: {
+        root: {
+          textTransform: 'none',
+          fontWeight: 500,
+          letterSpacing: 'normal',
+        },
+      },
+    },
+
     Table: {
       styles: {
         thead: {
@@ -76,6 +87,79 @@ export const theme = createTheme({
         },
         td: {
           borderBottom: '1px solid #f1f3f5',
+        },
+      },
+    },
+
+    // ✅ Configuration supplémentaire pour les titres
+    Title: {
+      styles: {
+        root: {
+          fontWeight: 600,
+        },
+      },
+    },
+
+    // ✅ Configuration pour les Alertes
+    Alert: {
+      styles: {
+        root: {
+          borderRadius: '8px',
+        },
+      },
+    },
+
+    // ✅ Configuration pour les Modals
+    Modal: {
+      styles: {
+        header: {
+          backgroundColor: '#1b365d',
+          color: 'white',
+          borderTopLeftRadius: '8px',
+          borderTopRightRadius: '8px',
+        },
+        title: {
+          color: 'white',
+          fontWeight: 600,
+        },
+        content: {
+          borderRadius: '8px',
+        },
+      },
+    },
+
+    // ✅ Configuration pour les Select
+    Select: {
+      styles: {
+        input: {
+          borderRadius: '8px',
+        },
+      },
+    },
+
+    // ✅ Configuration pour les NumberInput
+    NumberInput: {
+      styles: {
+        input: {
+          borderRadius: '8px',
+        },
+      },
+    },
+
+    // ✅ Configuration pour les TextInput
+    TextInput: {
+      styles: {
+        input: {
+          borderRadius: '8px',
+        },
+      },
+    },
+
+    // ✅ Configuration pour les Pagination
+    Pagination: {
+      styles: {
+        control: {
+          borderRadius: '8px',
         },
       },
     },

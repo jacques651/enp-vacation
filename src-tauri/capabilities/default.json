@@ -9,6 +9,34 @@
     "core:webview:default",
     "core:app:default",
     "core:path:default",
-    "core:event:default"
+    "core:event:default",
+    {
+      "identifier": "dialog:allow-save",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "/Users/**"
+        },
+        {
+          "path": "C:\\Users\\**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "/Users/**"
+        },
+        {
+          "path": "C:\\Users\\**"
+        }
+      ]
+    }
   ]
 }

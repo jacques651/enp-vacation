@@ -323,7 +323,7 @@ export default function BanquesManager() {
         <Stack gap="md">
           <TextInput
             label="Désignation"
-            placeholder="Ex: BICEC, SCB, BGFI, Afriland..."
+            placeholder="Ex: ORABANK, SGBF, CORIS BANK,..."
             value={formDesignation}
             onChange={(e) => setFormDesignation(e.target.value)}
             withAsterisk

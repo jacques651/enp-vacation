@@ -528,7 +528,7 @@ export default function MatieresManager() {
         <Stack gap="md">
           <TextInput
             label="Désignation"
-            placeholder="Ex: Mathématiques, Physique, Chimie..."
+            placeholder="Ex: Secourisme, Ethique et déontologie..."
             value={formData.designation}
             onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
             withAsterisk

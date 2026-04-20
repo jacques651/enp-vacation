@@ -6,7 +6,7 @@ use tauri::State;
 use sqlx::FromRow;
 
 // =========================
-// STRUCTURE
+// STRUCTURE (sans infos bancaires)
 // =========================
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -16,28 +16,21 @@ pub struct LiquidationRow {
     pub prenom: String,
     pub titre: String,
     pub statut: String,
-
     pub cycle: String,
     pub module: String,
     pub matiere: String,
-
-    pub banque: Option<String>,
-    pub numero_compte: Option<String>,
-
     pub vhoraire: f64,
-    pub nb_classe: f64,
-
+    pub nb_classe: i32,
     pub vht: f64,
     pub montant_brut: f64,
     pub montant_retenu: f64,
     pub montant_net: f64,
-
     pub mois: i32,
     pub annee: i32,
 }
 
 // =========================
-// QUERY PRINCIPALE
+// QUERY PRINCIPALE (sans jointures bancaires)
 // =========================
 
 async fn get_rows(
@@ -45,58 +38,46 @@ async fn get_rows(
     mois: i32,
     annee: i32,
 ) -> Result<Vec<LiquidationRow>, String> {
-
+    println!("🔍 get_rows appelé avec mois={}, annee={}", mois, annee);
+    
     let rows = sqlx::query_as::<_, LiquidationRow>(
-    r#"
-    SELECT 
-        v.id,
-        e.nom,
-        e.prenom,
-        e.titre,
-        e.statut,
+        r#"
+        SELECT 
+            v.id,
+            e.nom,
+            e.prenom,
+            e.titre,
+            e.statut,
+            c.designation as cycle,
+            mo.designation as module,
+            m.designation as matiere,
+            m.vhoraire,
+            v.nb_classe,
+            v.vht,
+            (v.vht * v.taux_horaire) as montant_brut,
+            (v.vht * v.taux_horaire * v.taux_retenue / 100.0) as montant_retenu,
+            (v.vht * v.taux_horaire * (1 - v.taux_retenue/100.0)) as montant_net,
+            v.mois,
+            v.annee
+        FROM vacations v
+        JOIN enseignants e ON e.id = v.enseignant_id
+        JOIN matieres m ON m.id = v.matiere_id
+        JOIN modules mo ON mo.id = m.module_id
+        JOIN cycles c ON c.id = mo.cycle_id
+        WHERE v.mois = ? AND v.annee = ?
+        ORDER BY e.nom, e.prenom
+        "#
+    )
+    .bind(mois)
+    .bind(annee)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        println!("❌ Erreur SQL: {}", e);
+        e.to_string()
+    })?;
 
-        c.designation as cycle,
-        mo.designation as module,
-        m.designation as matiere,
-
-        b.designation as banque,
-        cb.numero_compte,
-
-        m.vhoraire,              -- ✔ vient de matieres
-        v.nb_classe,
-
-        v.vht,                   -- ✔ source de vérité
-
-        (v.vht * v.taux_horaire) as montant_brut,
-
-        (v.vht * v.taux_horaire * v.taux_retenue / 100.0) as montant_retenu,
-
-        (v.vht * v.taux_horaire * (1 - v.taux_retenue/100.0)) as montant_net,
-
-        v.mois,
-        v.annee
-
-    FROM vacations v
-    JOIN enseignants e ON e.id = v.enseignant_id
-    JOIN matieres m ON m.id = v.matiere_id
-    JOIN modules mo ON mo.id = m.module_id
-    JOIN cycles c ON c.id = mo.cycle_id
-
-    LEFT JOIN comptes_bancaires cb 
-        ON cb.enseignant_id = e.id AND cb.actif = 1
-    LEFT JOIN banques b ON b.id = cb.banque_id
-
-    WHERE v.mois = ? AND v.annee = ?
-
-    ORDER BY e.nom, e.prenom
-    "#
-)
-.bind(mois)
-.bind(annee)
-.fetch_all(pool)
-.await
-.map_err(|e| e.to_string())?;
-
+    println!("✅ {} lignes trouvées", rows.len());
     Ok(rows)
 }
 
@@ -110,7 +91,7 @@ pub async fn get_etat_liquidation(
     mois: i32,
     annee: i32,
 ) -> Result<Vec<LiquidationRow>, String> {
-
+    println!("📥 get_etat_liquidation appelé");
     get_rows(&state.pool, mois, annee).await
 }
 
@@ -132,7 +113,8 @@ pub async fn get_totaux_liquidation(
     mois: i32,
     annee: i32,
 ) -> Result<Totaux, String> {
-
+    println!("📊 get_totaux_liquidation appelé");
+    
     let rows = get_rows(&state.pool, mois, annee).await?;
 
     let total_heures: f64 = rows.iter().map(|r| r.vht).sum();

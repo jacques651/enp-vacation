@@ -10,34 +10,40 @@ import {
   Table,
   Badge,
   Divider,
-  ActionIcon,
+  ThemeIcon,
   TextInput,
   Select,
-  Modal,
+  ActionIcon,
+  ScrollArea,
   LoadingOverlay,
-  ThemeIcon,
+  Modal,
   Pagination,
+  Tooltip,
+  Switch,
 } from '@mantine/core';
 import {
-  IconPlus,
-  IconEdit,
-  IconTrash,
-  IconSearch,
+  IconBuildingBank,
   IconCheck,
   IconAlertCircle,
-  IconTableImport,
-  IconBuildingBank,
+  IconEdit,
+  IconTrash,
+  IconPlus,
+  IconSearch,
+  IconInfoCircle,
+  IconCreditCard,
 } from '@tabler/icons-react';
-
 import { invoke } from '@tauri-apps/api/core';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 // ================= TYPES =================
-
 interface Enseignant {
   id: number;
   nom: string;
   prenom: string;
+  titre: string;      // Ajouté
+  statut: string;     // Ajouté
+  telephone?: string | null;
+  vh_max?: number;
 }
 
 interface Banque {
@@ -50,136 +56,226 @@ interface CompteBancaire {
   enseignant_id: number;
   banque_id: number;
   numero_compte: string;
-  actif: boolean;
-  banque: string;
+  cle_rib: string;
+  actif: number;
+  date_debut: string | null;
+  date_fin: string | null;
+  enseignant_nom?: string;
+  enseignant_prenom?: string;
+  banque_designation?: string;
 }
 
-// ================= COMPONENT =================
+interface CreateCompteBancaire {
+  enseignant_id: number;
+  banque_id: number;
+  numero_compte: string;
+  cle_rib: string;
+  actif?: number;
+  date_debut?: string | null;
+  date_fin?: string | null;
+}
 
+// ================= CONSTANTES =================
 export default function ComptesBancairesManager() {
   const queryClient = useQueryClient();
-
   const [modalOpened, setModalOpened] = useState(false);
-  const [selectedEnseignant, setSelectedEnseignant] = useState<number | null>(null);
-  const [search, setSearch] = useState('');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [sortBy, setSortBy] = useState<'enseignant' | 'banque' | 'numero_compte'>('enseignant');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const itemsPerPage = 10;
 
-  const [formData, setFormData] = useState({
-    enseignant_id: null as number | null,
-    banque_id: null as number | null,
+  // État du formulaire
+  const [formData, setFormData] = useState<CreateCompteBancaire>({
+    enseignant_id: 0,
+    banque_id: 0,
     numero_compte: '',
+    cle_rib: '',
+    actif: 1,
+    date_debut: null,
+    date_fin: null,
   });
 
-  // ================= DATA =================
-
-  const { data: enseignants = [], isLoading: isLoadingEnseignants } = useQuery<Enseignant[]>({
+  // Récupérer les enseignants
+  const { data: enseignants = [] } = useQuery<Enseignant[]>({
     queryKey: ['enseignants'],
-    queryFn: () => invoke('get_enseignants'),
-  });
-
-  const { data: banques = [], isLoading: isLoadingBanques } = useQuery<Banque[]>({
-    queryKey: ['banques'],
-    queryFn: () => invoke('get_banques'),
-  });
-
-  const { 
-    data: comptes = [], 
-    isLoading: isLoadingComptes,
-  } = useQuery<CompteBancaire[]>({
-    queryKey: ['comptes', selectedEnseignant],
-    queryFn: () => {
-      if (!selectedEnseignant) return Promise.resolve([]);
-      return invoke('get_comptes_by_enseignant', { enseignantId: selectedEnseignant });
+    queryFn: async () => {
+      const result = await invoke('get_enseignants');
+      return result as Enseignant[];
     },
-    enabled: !!selectedEnseignant,
   });
 
-  const enseignantMap = useMemo(
-    () => Object.fromEntries(enseignants.map(e => [e.id, e])),
-    [enseignants]
-  );
-
-  // Pagination des enseignants
-  const filteredEnseignants = enseignants.filter(e => {
-    const label = `${e.nom} ${e.prenom}`.toLowerCase();
-    return label.includes(search.toLowerCase());
+  // Récupérer les banques
+  const { data: banques = [] } = useQuery<Banque[]>({
+    queryKey: ['banques'],
+    queryFn: async () => {
+      const result = await invoke('get_banques');
+      return result as Banque[];
+    },
   });
 
-  const totalPages = Math.ceil(filteredEnseignants.length / itemsPerPage);
-  const paginatedEnseignants = filteredEnseignants.slice(
+  // Récupérer les comptes bancaires
+  const { data: comptes = [], isLoading, error } = useQuery<CompteBancaire[]>({
+    queryKey: ['comptes_bancaires'],
+    queryFn: async () => {
+      const result = await invoke('get_comptes_bancaires');
+      return result as CompteBancaire[];
+    },
+  });
+
+  // Filtrer et trier les données
+  const filteredAndSortedData = useMemo(() => {
+    let filtered = comptes.filter(c =>
+      `${c.enseignant_nom} ${c.enseignant_prenom}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.banque_designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.numero_compte.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    return [...filtered].sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'enseignant') {
+        comparison = `${a.enseignant_nom} ${a.enseignant_prenom}`.localeCompare(`${b.enseignant_nom} ${b.enseignant_prenom}`);
+      } else if (sortBy === 'banque') {
+        comparison = (a.banque_designation || '').localeCompare(b.banque_designation || '');
+      } else if (sortBy === 'numero_compte') {
+        comparison = a.numero_compte.localeCompare(b.numero_compte);
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+  }, [comptes, searchTerm, sortBy, sortOrder]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredAndSortedData.length / itemsPerPage);
+  const paginatedData = filteredAndSortedData.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
 
-  // ================= MUTATIONS =================
-
+  // Mutations CRUD
   const createMutation = useMutation({
-    mutationFn: (data: { enseignant_id: number; banque_id: number; numero_compte: string }) =>
-      invoke('create_compte_bancaire', { data }),
+    mutationFn: (data: CreateCompteBancaire) => invoke('create_compte_bancaire', { data }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['comptes', selectedEnseignant] });
+      queryClient.invalidateQueries({ queryKey: ['comptes_bancaires'] });
       setModalOpened(false);
-      setFormData({ enseignant_id: null, banque_id: null, numero_compte: '' });
+      resetForm();
     },
-    onError: (error: string) => {
+    onError: (error) => {
       console.error('Erreur:', error);
-    },
+      alert('Erreur lors de la création du compte bancaire');
+    }
   });
 
-  const setActifMutation = useMutation({
-    mutationFn: ({ id, enseignant_id }: { id: number; enseignant_id: number }) =>
-      invoke('set_compte_actif', { id, enseignantId: enseignant_id }),
+  const updateMutation = useMutation({
+    mutationFn: ({ id, ...data }: { id: number } & CreateCompteBancaire) =>
+      invoke('update_compte_bancaire', { id, data }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['comptes', selectedEnseignant] });
+      queryClient.invalidateQueries({ queryKey: ['comptes_bancaires'] });
+      setModalOpened(false);
+      resetForm();
     },
+    onError: (error) => {
+      console.error('Erreur:', error);
+      alert('Erreur lors de la modification du compte bancaire');
+    }
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => invoke('delete_compte', { id }),
+    mutationFn: (id: number) => invoke('delete_compte_bancaire', { id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['comptes', selectedEnseignant] });
+      queryClient.invalidateQueries({ queryKey: ['comptes_bancaires'] });
+      setDeleteId(null);
     },
+    onError: (error) => {
+      console.error('Erreur:', error);
+      alert('Erreur lors de la suppression du compte bancaire');
+    }
   });
 
-  // ================= ACTIONS =================
-
-  const handleSubmit = () => {
-    if (!formData.enseignant_id || !formData.banque_id || !formData.numero_compte) {
-      return;
-    }
-
-    createMutation.mutate({
-      enseignant_id: formData.enseignant_id,
-      banque_id: formData.banque_id,
-      numero_compte: formData.numero_compte,
+  const resetForm = () => {
+    setEditingId(null);
+    setFormData({
+      enseignant_id: 0,
+      banque_id: 0,
+      numero_compte: '',
+      cle_rib: '',
+      actif: 1,
+      date_debut: null,
+      date_fin: null,
     });
   };
 
-  const handleSetActif = (id: number, enseignant_id: number) => {
-    setActifMutation.mutate({ id, enseignant_id });
+  const openCreateModal = () => {
+    resetForm();
+    setModalOpened(true);
   };
 
-  const handleSelectEnseignant = (enseignantId: number) => {
-    setSelectedEnseignant(enseignantId);
+  const openEditModal = (item: CompteBancaire) => {
+    setEditingId(item.id);
+    setFormData({
+      enseignant_id: item.enseignant_id,
+      banque_id: item.banque_id,
+      numero_compte: item.numero_compte,
+      cle_rib: item.cle_rib,
+      actif: item.actif,
+      date_debut: item.date_debut,
+      date_fin: item.date_fin,
+    });
+    setModalOpened(true);
+  };
+
+  const handleSubmit = () => {
+    if (!formData.enseignant_id || !formData.banque_id || !formData.numero_compte.trim()) {
+      alert('Veuillez remplir tous les champs obligatoires');
+      return;
+    }
+
+    if (editingId) {
+      updateMutation.mutate({ id: editingId, ...formData });
+    } else {
+      createMutation.mutate(formData);
+    }
+  };
+
+  const handleSort = (column: 'enseignant' | 'banque' | 'numero_compte') => {
+    if (sortBy === column) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(column);
+      setSortOrder('asc');
+    }
     setCurrentPage(1);
   };
 
-  const isLoading = isLoadingEnseignants || isLoadingBanques || isLoadingComptes;
+  if (isLoading) {
+    return (
+      <Card withBorder radius="md" p="lg" pos="relative">
+        <LoadingOverlay visible={true} />
+        <Text>Chargement des comptes bancaires...</Text>
+      </Card>
+    );
+  }
 
-  // ================= UI =================
+  if (error) {
+    return (
+      <Card withBorder radius="md" p="lg">
+        <Alert icon={<IconAlertCircle size={16} />} color="red" title="Erreur">
+          Impossible de charger les comptes bancaires
+        </Alert>
+      </Card>
+    );
+  }
 
   return (
     <Stack p="md" gap="lg">
-      <LoadingOverlay visible={isLoading} />
-
-      {/* HEADER - Même style que ImportExcel */}
+      {/* HEADER */}
       <Card withBorder radius="md" p="lg" bg="adminBlue.8">
         <Group justify="space-between">
           <Stack gap={2}>
             <Title order={2} c="white">Gestion des comptes bancaires</Title>
             <Text size="sm" c="gray.3">
-              Gérez les comptes bancaires des enseignants
+              {filteredAndSortedData.length} compte{filteredAndSortedData.length > 1 ? 's' : ''} bancaire enregistré{filteredAndSortedData.length > 1 ? 's' : ''}
             </Text>
           </Stack>
           <ThemeIcon size={48} radius="md" color="white" variant="light">
@@ -188,70 +284,122 @@ export default function ComptesBancairesManager() {
         </Group>
       </Card>
 
-      {/* SECTION ENSEIGNANTS */}
+      {/* CONTENU PRINCIPAL */}
       <Card withBorder radius="md" p="lg">
         <Stack gap="md">
-          <div>
-            <Title order={4}>Sélectionner un enseignant</Title>
-            <Text size="sm" c="dimmed">
-              Choisissez un enseignant pour gérer ses comptes bancaires
-            </Text>
-          </div>
+          {/* EN-TÊTE DU CARD */}
+          <Group justify="space-between" align="flex-end">
+            <div>
+              <Title order={4}>Comptes bancaires</Title>
+              <Text size="sm" c="dimmed">
+                Gérez les comptes bancaires des enseignants
+              </Text>
+            </div>
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={openCreateModal}
+              variant="gradient"
+              gradient={{ from: 'blue', to: 'cyan' }}
+            >
+              Ajouter un compte bancaire
+            </Button>
+          </Group>
 
           <Divider />
 
+          {/* RECHERCHE */}
           <TextInput
-            placeholder="Rechercher un enseignant..."
+            placeholder="Rechercher par enseignant, banque ou numéro de compte..."
             leftSection={<IconSearch size={16} />}
-            value={search}
+            value={searchTerm}
             onChange={(e) => {
-              setSearch(e.currentTarget.value);
+              setSearchTerm(e.target.value);
               setCurrentPage(1);
             }}
           />
 
-          {filteredEnseignants.length === 0 ? (
+          {/* TABLEAU DES COMPTES BANCAIRES */}
+          {filteredAndSortedData.length === 0 ? (
             <Alert icon={<IconAlertCircle size={16} />} color="blue" variant="light">
-              Aucun enseignant trouvé.
+              Aucun compte bancaire trouvé. Cliquez sur "Ajouter" pour commencer.
             </Alert>
           ) : (
             <>
-              <ScrollArea style={{ maxHeight: 400 }}>
+              <ScrollArea style={{ maxHeight: 600 }}>
                 <Table striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
-                      <Table.Th>N°</Table.Th>
-                      <Table.Th>Nom</Table.Th>
-                      <Table.Th>Prénom</Table.Th>
-                      <Table.Th style={{ width: 120 }}>Action</Table.Th>
+                      <Table.Th style={{ width: 70 }}>N°</Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('enseignant')}>
+                        Enseignant
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('banque')}>
+                        Banque
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('numero_compte')}>
+                        Numéro de compte
+                      </Table.Th>
+                      <Table.Th>Clé RIB</Table.Th>
+                      <Table.Th>Statut</Table.Th>
+                      <Table.Th style={{ width: 100, textAlign: 'center' }}>Actions</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {paginatedEnseignants.map((enseignant, index) => {
+                    {paginatedData.map((item, index) => {
                       const numero = (currentPage - 1) * itemsPerPage + index + 1;
                       return (
-                        <Table.Tr 
-                          key={enseignant.id}
-                          bg={selectedEnseignant === enseignant.id ? 'blue.0' : undefined}
-                        >
+                        <Table.Tr key={item.id}>
                           <Table.Td>
                             <Badge color="gray" variant="light" size="sm">
                               {numero}
                             </Badge>
                           </Table.Td>
                           <Table.Td>
-                            <Text fw={500}>{enseignant.nom}</Text>
+                            <Text size="sm" fw={500}>
+                              {item.enseignant_nom} {item.enseignant_prenom}
+                            </Text>
                           </Table.Td>
-                          <Table.Td>{enseignant.prenom}</Table.Td>
                           <Table.Td>
-                            <Button
-                              variant={selectedEnseignant === enseignant.id ? 'filled' : 'light'}
-                              size="xs"
-                              onClick={() => handleSelectEnseignant(enseignant.id)}
-                              color={selectedEnseignant === enseignant.id ? 'blue' : 'gray'}
+                            <Badge color="blue" variant="light" size="sm">
+                              {item.banque_designation}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="sm" fw={500} style={{ fontFamily: 'monospace' }}>
+                              {item.numero_compte}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="sm" style={{ fontFamily: 'monospace' }}>
+                              {item.cle_rib}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge
+                              color={item.actif === 1 ? 'green' : 'red'}
+                              variant="light"
+                              size="sm"
                             >
-                              {selectedEnseignant === enseignant.id ? 'Sélectionné' : 'Sélectionner'}
-                            </Button>
+                              {item.actif === 1 ? 'Actif' : 'Inactif'}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap="xs" justify="center">
+                              <ActionIcon
+                                variant="subtle"
+                                color="blue"
+                                onClick={() => openEditModal(item)}
+                              >
+                                <IconEdit size={16} />
+                              </ActionIcon>
+                              <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                onClick={() => setDeleteId(item.id)}
+                              >
+                                <IconTrash size={16} />
+                              </ActionIcon>
+                            </Group>
                           </Table.Td>
                         </Table.Tr>
                       );
@@ -260,6 +408,7 @@ export default function ComptesBancairesManager() {
                 </Table>
               </ScrollArea>
 
+              {/* PAGINATION */}
               {totalPages > 1 && (
                 <Group justify="center" mt="md">
                   <Pagination
@@ -272,153 +421,138 @@ export default function ComptesBancairesManager() {
               )}
             </>
           )}
+
+          {/* MESSAGE DE SUCCÈS */}
+          {(createMutation.isSuccess || updateMutation.isSuccess) && (
+            <Alert icon={<IconCheck size={16} />} color="green" variant="light">
+              Compte bancaire {createMutation.isSuccess ? 'ajouté' : 'modifié'} avec succès
+            </Alert>
+          )}
         </Stack>
       </Card>
 
-      {/* COMPTES BANCAIRES */}
-      {selectedEnseignant && (
-        <Card withBorder radius="md" p="lg">
-          <Stack gap="md">
-            <Group justify="space-between" align="flex-end">
-              <div>
-                <Title order={4}>
-                  Comptes bancaires de {enseignantMap[selectedEnseignant]?.nom} {enseignantMap[selectedEnseignant]?.prenom}
-                </Title>
-                <Text size="sm" c="dimmed">
-                  {comptes.length} compte{comptes.length > 1 ? 's' : ''} enregistré{comptes.length > 1 ? 's' : ''}
-                </Text>
-              </div>
-              <Button
-                leftSection={<IconPlus size={16} />}
-                onClick={() => setModalOpened(true)}
-                variant="gradient"
-                gradient={{ from: 'blue', to: 'cyan' }}
-              >
-                Ajouter un compte
-              </Button>
-            </Group>
+     {/* MODAL D'AJOUT / MODIFICATION */}
+<Modal
+  opened={modalOpened}
+  onClose={() => {
+    setModalOpened(false);
+    resetForm();
+  }}
+  title={editingId ? "Modifier le compte bancaire" : "Ajouter un compte bancaire"}
+  size="md"
+>
+  <Stack gap="md">
+    <Select
+      label="Enseignant"
+      placeholder="Sélectionnez un enseignant"
+      data={enseignants.map(e => ({ 
+        value: String(e.id), 
+        label: `${e.nom} ${e.prenom} (${e.titre} - ${e.statut === 'interne' ? 'Interne' : 'Externe'})`
+      }))}
+      value={formData.enseignant_id ? String(formData.enseignant_id) : ''}
+      onChange={(val) => {
+        if (val) {
+          const enseignantId = parseInt(val, 10);
+          setFormData({ ...formData, enseignant_id: enseignantId });
+        } else {
+          setFormData({ ...formData, enseignant_id: 0 });
+        }
+      }}
+      withAsterisk
+      searchable
+      clearable
+      error={formData.enseignant_id === 0 && editingId === null ? "Veuillez sélectionner un enseignant" : undefined}
+    />
 
-            <Divider />
+    <Select
+      label="Banque"
+      placeholder="Sélectionnez une banque"
+      data={banques.map(b => ({ 
+        value: String(b.id), 
+        label: b.designation 
+      }))}
+      value={formData.banque_id ? String(formData.banque_id) : ''}
+      onChange={(val) => {
+        if (val) {
+          const banqueId = parseInt(val, 10);
+          setFormData({ ...formData, banque_id: banqueId });
+        } else {
+          setFormData({ ...formData, banque_id: 0 });
+        }
+      }}
+      withAsterisk
+      searchable
+      clearable
+      error={formData.banque_id === 0 && editingId === null ? "Veuillez sélectionner une banque" : undefined}
+    />
 
-            {comptes.length === 0 ? (
-              <Alert icon={<IconAlertCircle size={16} />} color="blue" variant="light">
-                Aucun compte bancaire enregistré pour cet enseignant.
-              </Alert>
-            ) : (
-              <Table striped highlightOnHover>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Banque</Table.Th>
-                    <Table.Th>Numéro de compte</Table.Th>
-                    <Table.Th>Statut</Table.Th>
-                    <Table.Th style={{ width: 120 }}>Actions</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {comptes.map((compte) => (
-                    <Table.Tr key={compte.id}>
-                      <Table.Td>
-                        <Badge color="cyan" variant="light" size="sm">
-                          {compte.banque}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text fw={500}>{compte.numero_compte}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge color={compte.actif ? 'green' : 'gray'} variant="light">
-                          {compte.actif ? 'Actif' : 'Inactif'}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap="xs">
-                          {!compte.actif && (
-                            <ActionIcon
-                              color="green"
-                              onClick={() => handleSetActif(compte.id, compte.enseignant_id)}
-                              loading={setActifMutation.isPending}
-                              title="Définir comme compte actif"
-                              variant="subtle"
-                            >
-                              <IconCheck size={16} />
-                            </ActionIcon>
-                          )}
-                          <ActionIcon 
-                            color="red" 
-                            onClick={() => deleteMutation.mutate(compte.id)}
-                            loading={deleteMutation.isPending}
-                            title="Supprimer"
-                            variant="subtle"
-                          >
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            )}
-          </Stack>
-        </Card>
-      )}
+    <TextInput
+      label="Numéro de compte"
+      placeholder="Ex: 612095100001"
+      value={formData.numero_compte}
+      onChange={(e) => setFormData({ ...formData, numero_compte: e.target.value })}
+      withAsterisk
+      error={!formData.numero_compte && editingId === null ? "Le numéro de compte est requis" : undefined}
+    />
 
-      {/* MODAL AJOUT COMPTE */}
-      <Modal 
-        opened={modalOpened} 
-        onClose={() => {
-          setModalOpened(false);
-          setFormData({ enseignant_id: null, banque_id: null, numero_compte: '' });
-        }} 
-        title="Ajouter un compte bancaire"
-        size="md"
+    <TextInput
+      label="Clé RIB"
+      placeholder="Ex: 23"
+      value={formData.cle_rib}
+      onChange={(e) => setFormData({ ...formData, cle_rib: e.target.value })}
+      withAsterisk
+      error={!formData.cle_rib && editingId === null ? "La clé RIB est requise" : undefined}
+    />
+
+    <Switch
+      label="Compte actif"
+      checked={formData.actif === 1}
+      onChange={(e) => setFormData({ ...formData, actif: e.currentTarget.checked ? 1 : 0 })}
+      size="md"
+    />
+
+    <Group justify="flex-end" mt="md">
+      <Button variant="light" onClick={() => setModalOpened(false)}>
+        Annuler
+      </Button>
+      <Button
+        onClick={handleSubmit}
+        loading={createMutation.isPending || updateMutation.isPending}
+        variant="gradient"
+        gradient={{ from: 'blue', to: 'cyan' }}
+        disabled={
+          formData.enseignant_id === 0 || 
+          formData.banque_id === 0 || 
+          !formData.numero_compte.trim() || 
+          !formData.cle_rib.trim()
+        }
+      >
+        {editingId ? 'Mettre à jour' : 'Ajouter'}
+      </Button>
+    </Group>
+  </Stack>
+</Modal>
+
+      {/* MODAL DE CONFIRMATION SUPPRESSION */}
+      <Modal
+        opened={deleteId !== null}
+        onClose={() => setDeleteId(null)}
+        title="Confirmation"
         centered
       >
-        <Stack gap="md">
-          <Select
-            label="Enseignant"
-            placeholder="Sélectionner un enseignant"
-            data={enseignants.map(e => ({
-              value: String(e.id),
-              label: `${e.nom} ${e.prenom}`,
-            }))}
-            value={formData.enseignant_id?.toString() || null}
-            onChange={(v) => setFormData({ ...formData, enseignant_id: v ? parseInt(v) : null })}
-            required
-          />
-
-          <Select
-            label="Banque"
-            placeholder="Sélectionner une banque"
-            data={banques.map(b => ({
-              value: String(b.id),
-              label: b.designation,
-            }))}
-            value={formData.banque_id?.toString() || null}
-            onChange={(v) => setFormData({ ...formData, banque_id: v ? parseInt(v) : null })}
-            required
-          />
-
-          <TextInput
-            label="Numéro de compte"
-            placeholder="Entrez le numéro de compte"
-            value={formData.numero_compte}
-            onChange={(e) => setFormData({ ...formData, numero_compte: e.currentTarget.value })}
-            required
-          />
-
+        <Stack>
+          <Text>Êtes-vous sûr de vouloir supprimer ce compte bancaire ?</Text>
+          <Text size="sm" c="dimmed">Cette action est irréversible.</Text>
           <Group justify="flex-end" mt="md">
-            <Button variant="light" onClick={() => setModalOpened(false)}>
+            <Button variant="light" onClick={() => setDeleteId(null)}>
               Annuler
             </Button>
-            <Button 
-              onClick={handleSubmit} 
-              loading={createMutation.isPending}
-              disabled={!formData.enseignant_id || !formData.banque_id || !formData.numero_compte}
-              variant="gradient"
-              gradient={{ from: 'blue', to: 'cyan' }}
+            <Button
+              color="red"
+              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
+              loading={deleteMutation.isPending}
             >
-              Créer le compte
+              Supprimer
             </Button>
           </Group>
         </Stack>
@@ -428,26 +562,13 @@ export default function ComptesBancairesManager() {
       <Card withBorder radius="md" p="lg">
         <Title order={5} mb="md">📋 Instructions</Title>
         <Stack gap="xs">
-          <Text size="sm">1. Sélectionnez d'abord un enseignant dans la liste</Text>
-          <Text size="sm">2. Cliquez sur "Ajouter un compte" pour créer un compte bancaire</Text>
-          <Text size="sm">3. Un seul compte peut être actif par enseignant</Text>
-          <Text size="sm">4. Le compte actif sera utilisé pour les virements automatiques</Text>
-          <Text size="sm">5. Utilisez la recherche pour trouver rapidement un enseignant</Text>
-        </Stack>
-        
-        <Divider my="md" />
-        
-        <Title order={5} mb="md">📝 Notes importantes</Title>
-        <Stack gap="xs">
-          <Text size="sm">• Les comptes bancaires sont liés aux enseignants et aux banques</Text>
-          <Text size="sm">• Seul le compte actif reçoit les virements</Text>
-          <Text size="sm">• La suppression d'un compte est définitive</Text>
-          <Text size="sm">• Les banques doivent être préalablement créées dans le référentiel</Text>
+          <Text size="sm">1. Sélectionnez l'enseignant et la banque</Text>
+          <Text size="sm">2. Saisissez le numéro de compte bancaire et la clé RIB</Text>
+          <Text size="sm">3. Un compte peut être désactivé sans être supprimé</Text>
+          <Text size="sm">4. Chaque enseignant peut avoir plusieurs comptes bancaires</Text>
+          <Text size="sm">5. Le compte actif sera utilisé par défaut pour les virements</Text>
         </Stack>
       </Card>
     </Stack>
   );
 }
-
-// Ajout du composant ScrollArea manquant
-import { ScrollArea } from '@mantine/core';

@@ -36,6 +36,29 @@ pub struct UpdatePlafond {
 }
 
 // =========================
+// FONCTIONS DE NORMALISATION
+// =========================
+
+fn normalize_titre(titre: &str) -> String {
+    match titre.to_lowercase().as_str() {
+        t if t.contains("agent") => "agent".to_string(),
+        t if t.contains("directeur") => "directeur".to_string(),
+        t if t.contains("chef de service") => "chef de service".to_string(),
+        t if t.contains("chef de division") => "chef de division/service".to_string(),
+        t if t.contains("retraité") || t.contains("retraite") => "retraité".to_string(),
+        _ => "autre".to_string(),
+    }
+}
+
+fn normalize_statut(statut: &str) -> Result<String, String> {
+    match statut.to_lowercase().as_str() {
+        s if s.contains("interne") => Ok("interne".to_string()),
+        s if s.contains("externe") => Ok("externe".to_string()),
+        _ => Err(format!("Statut '{}' invalide (doit être: interne ou externe)", statut)),
+    }
+}
+
+// =========================
 // VALIDATION
 // =========================
 
@@ -92,7 +115,7 @@ pub async fn get_plafond_by_id(
 }
 
 // =========================
-// CREATE
+// CREATE (AVEC NORMALISATION)
 // =========================
 
 #[tauri::command]
@@ -101,7 +124,12 @@ pub async fn create_plafond(
     data: CreatePlafond,
 ) -> Result<Plafond, String> {
 
-    validate(&data.titre, &data.statut, data.volume_horaire_max)?;
+    // Normaliser les valeurs
+    let titre = normalize_titre(&data.titre);
+    let statut = normalize_statut(&data.statut)?;
+    let volume = data.volume_horaire_max;
+
+    validate(&titre, &statut, volume)?;
 
     let id: i32 = sqlx::query_scalar(
         r#"
@@ -110,14 +138,14 @@ pub async fn create_plafond(
         RETURNING id
         "#
     )
-    .bind(&data.titre)
-    .bind(&data.statut)
-    .bind(data.volume_horaire_max)
+    .bind(&titre)
+    .bind(&statut)
+    .bind(volume)
     .fetch_one(&state.pool)
     .await
     .map_err(|e| {
         if e.to_string().contains("UNIQUE") {
-            "Ce plafond existe déjà".into()
+            format!("Le plafond '{}' pour le statut '{}' existe déjà", titre, statut)
         } else {
             e.to_string()
         }
@@ -126,8 +154,9 @@ pub async fn create_plafond(
     get_plafond_by_id(state, id).await
 }
 
+
 // =========================
-// UPDATE
+// UPDATE (CORRIGÉ)
 // =========================
 
 #[tauri::command]
@@ -139,11 +168,42 @@ pub async fn update_plafond(
 
     let current = get_plafond_by_id(state.clone(), id).await?;
 
-    let titre = data.titre.unwrap_or(current.titre);
-    let statut = data.statut.unwrap_or(current.statut);
+    // Utiliser des références pour éviter de déplacer les valeurs
+    let titre = if let Some(ref t) = data.titre {
+        normalize_titre(t)
+    } else {
+        current.titre.clone()
+    };
+    
+    let statut = if let Some(ref s) = data.statut {
+        normalize_statut(s)?
+    } else {
+        current.statut.clone()
+    };
+    
     let volume = data.volume_horaire_max.unwrap_or(current.volume_horaire_max);
 
     validate(&titre, &statut, volume)?;
+
+    // Vérifier si le nouveau couple (titre, statut) existe déjà
+    let titre_changed = data.titre.is_some() && titre != current.titre;
+    let statut_changed = data.statut.is_some() && statut != current.statut;
+    
+    if titre_changed || statut_changed {
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM plafonds WHERE titre = ? AND statut = ? AND id != ?)"
+        )
+        .bind(&titre)
+        .bind(&statut)
+        .bind(id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        
+        if exists == 1 {
+            return Err(format!("Le plafond '{}' pour le statut '{}' existe déjà", titre, statut));
+        }
+    }
 
     sqlx::query(
         r#"
@@ -185,7 +245,8 @@ pub async fn delete_plafond(
     .map_err(|e| e.to_string())?;
 
     if used == 1 {
-        return Err("Impossible : plafond utilisé par des enseignants".into());
+        return Err(format!("Impossible de supprimer : le plafond '{}' pour le statut '{}' est utilisé par des enseignants", 
+            plafond.titre, plafond.statut));
     }
 
     sqlx::query("DELETE FROM plafonds WHERE id = ?")
@@ -198,7 +259,7 @@ pub async fn delete_plafond(
 }
 
 // =========================
-// GET PAR TITRE + STATUT
+// GET PAR TITRE + STATUT (AVEC NORMALISATION)
 // =========================
 
 #[tauri::command]
@@ -208,14 +269,18 @@ pub async fn get_volume_horaire_max(
     statut: String,
 ) -> Result<i32, String> {
 
+    // Normaliser les valeurs pour la recherche
+    let titre_norm = normalize_titre(&titre);
+    let statut_norm = normalize_statut(&statut)?;
+
     let volume: i32 = sqlx::query_scalar(
         "SELECT volume_horaire_max FROM plafonds WHERE titre = ? AND statut = ?"
     )
-    .bind(titre)
-    .bind(statut)
+    .bind(&titre_norm)
+    .bind(&statut_norm)
     .fetch_one(&state.pool)
     .await
-    .map_err(|_| "Plafond non trouvé".to_string())?;
+    .map_err(|_| format!("Plafond non trouvé pour titre='{}' et statut='{}'", titre_norm, statut_norm))?;
 
     Ok(volume)
 }

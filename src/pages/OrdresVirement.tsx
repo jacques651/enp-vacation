@@ -14,128 +14,65 @@ import {
   Select,
   Switch,
   SimpleGrid,
-  ActionIcon,
   ScrollArea,
   LoadingOverlay,
   Collapse,
-  Paper,
 } from '@mantine/core';
-import { DateInput } from '@mantine/dates';
 import {
   IconPrinter,
   IconRefresh,
   IconFilter,
-  IconDeviceFloppy,
   IconEye,
   IconFileInvoice,
   IconAlertCircle,
-  IconCheck,
 } from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
 import { invoke } from '@tauri-apps/api/core';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 // ================= TYPES =================
-interface Enseignant {
+interface LigneOrdreResponse {
   id: number;
-  nom: string;
-  prenom: string;
-  titre: string;
-  statut: string;
-}
-
-interface Banque {
-  id: number;
-  designation: string;
-}
-
-interface Promotion {
-  id: number;
-  libelle: string;
-  annee_scolaire: string | null;
-}
-
-interface Cycle {
-  id: number;
-  designation: string;
-  nb_classe: number;
-}
-
-interface LigneOrdre {
   enseignant_id: number;
   nom: string;
   prenom: string;
-  titre: string;
-  statut_enseignant: string;
-  numero_compte: string | null;
-  cle_rib: string | null;
-  banque_designation: string | null;
+  compte_bancaire_id: number;
+  numero_compte: string;
+  cle_rib: string;
   montant_brut: number;
-  montant_retenu: number;
+  retenue: number;
   montant_net: number;
 }
 
-interface EnteteOrdre {
-  ministere: string;
-  ecole: string;
-  directeur_nom: string;
-  directeur_titre: string;
-  chef_service_nom: string;
-  chef_service_titre: string;
-  date_edition: string;
-}
-
-interface OrdreVirementOutput {
+interface OrdreVirementResponse {
   id: number;
+  banque_id: number;
+  banque_designation: string;
   numero_ordre: string;
   date_edition: string;
   objet: string;
-  motif: string | null;
   total_net: number;
-  filtre_banque: string | null;
-  filtre_enseignant_id: string | null;
-  filtre_mois: string | null;
-  filtre_annee: number | null;
-  filtre_annee_scolaire: string | null;
-  filtre_promotion_libelle: string | null;
-  filtre_cycle_designation: string | null;
-  filtre_module_designation: string | null;
-  filtre_matiere_designation: string | null;
-  lignes: LigneOrdre[];
-  entete: EnteteOrdre;
+  lignes: LigneOrdreResponse[];
 }
 
 interface OrdreVirementDB {
   id: number;
+  banque_id: number;
+  banque_designation: string;
   numero_ordre: string;
   date_edition: string;
   objet: string;
-  motif: string | null;
-  created_at: string;
-  created_by: string | null;
-}
-
-interface OrdreFiltres {
-  filtre_banque: string | null;
-  filtre_enseignant_id: string | null;
-  filtre_mois: string | null;
-  filtre_annee: number | null;
-  filtre_annee_scolaire: string | null;
-  filtre_promotion_id: number | null;
-  filtre_cycle_id: number | null;
-  filtre_module_id: number | null;
-  filtre_matiere_id: number | null;
-  filtre_date_debut: string | null;
-  filtre_date_fin: string | null;
+  total_net: number;
+  lignes: LigneOrdreResponse[];
 }
 
 // ================= CONSTANTES =================
 const MOIS_OPTIONS = [
-  { value: '01', label: 'Janvier' }, { value: '02', label: 'Février' },
-  { value: '03', label: 'Mars' }, { value: '04', label: 'Avril' },
-  { value: '05', label: 'Mai' }, { value: '06', label: 'Juin' },
-  { value: '07', label: 'Juillet' }, { value: '08', label: 'Août' },
-  { value: '09', label: 'Septembre' }, { value: '10', label: 'Octobre' },
+  { value: '1', label: 'Janvier' }, { value: '2', label: 'Février' },
+  { value: '3', label: 'Mars' }, { value: '4', label: 'Avril' },
+  { value: '5', label: 'Mai' }, { value: '6', label: 'Juin' },
+  { value: '7', label: 'Juillet' }, { value: '8', label: 'Août' },
+  { value: '9', label: 'Septembre' }, { value: '10', label: 'Octobre' },
   { value: '11', label: 'Novembre' }, { value: '12', label: 'Décembre' }
 ];
 
@@ -144,68 +81,19 @@ const ANNEES_OPTIONS = [
   { value: '2026', label: '2026' }, { value: '2027', label: '2027' },
 ];
 
-const ANNEES_SCOLAIRES_OPTIONS = [
-  { value: '2024-2025', label: '2024-2025' }, { value: '2025-2026', label: '2025-2026' },
-  { value: '2026-2027', label: '2026-2027' }, { value: '2027-2028', label: '2027-2028' },
-];
-
 export default function OrdreVirement() {
   const queryClient = useQueryClient();
   const printRef = useRef<HTMLDivElement>(null);
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [savedOrdresVisible, setSavedOrdresVisible] = useState(false);
-  const [selectedOrdreId, setSelectedOrdreId] = useState<number | null>(null);
 
-  // État des filtres
-  const [filters, setFilters] = useState({
-    filtre_mois: null as string | null,
-    filtre_annee: null as number | null,
-    filtre_enseignant_id: null as string | null,
-    filtre_banque: null as string | null,
-    filtre_annee_scolaire: null as string | null,
-    filtre_promotion_id: null as number | null,
-    filtre_cycle_id: null as number | null,
-    filtre_module_id: null as number | null,
-    filtre_matiere_id: null as number | null,
-    filtre_date_debut: null as Date | null,
-    filtre_date_fin: null as Date | null,
-  });
+  const [mois, setMois] = useState<string | null>(String(new Date().getMonth() + 1));
+  const [annee, setAnnee] = useState<string | null>(String(new Date().getFullYear()));
+  const [selectedOrdre, setSelectedOrdre] = useState<OrdreVirementResponse | null>(null);
 
-  // Récupérer les données référentielles
-  const { data: enseignants = [], isLoading: enseignantsLoading } = useQuery<Enseignant[]>({
-    queryKey: ['enseignants'],
-    queryFn: async () => {
-      const result = await invoke('get_enseignants');
-      return Array.isArray(result) ? result : [];
-    },
-  });
-
-  const { data: banques = [], isLoading: banquesLoading } = useQuery<Banque[]>({
-    queryKey: ['banques'],
-    queryFn: async () => {
-      const result = await invoke('get_banques');
-      return Array.isArray(result) ? result : [];
-    },
-  });
-
-  const { data: promotions = [], isLoading: promotionsLoading } = useQuery<Promotion[]>({
-    queryKey: ['promotions'],
-    queryFn: async () => {
-      const result = await invoke('get_promotions');
-      return Array.isArray(result) ? result : [];
-    },
-  });
-
-  const { data: cycles = [], isLoading: cyclesLoading } = useQuery<Cycle[]>({
-    queryKey: ['cycles'],
-    queryFn: async () => {
-      const result = await invoke('get_cycles');
-      return Array.isArray(result) ? result : [];
-    },
-  });
-
-  const { data: ordresSaved = [], isLoading: ordresLoading } = useQuery<OrdreVirementDB[]>({
+  // Récupérer les ordres sauvegardés
+  const { data: ordresSaved = [], isLoading: ordresLoading, refetch: refetchOrdres } = useQuery<OrdreVirementResponse[]>({
     queryKey: ['ordres_virement'],
     queryFn: async () => {
       const result = await invoke('get_ordres_virement');
@@ -214,109 +102,50 @@ export default function OrdreVirement() {
     enabled: savedOrdresVisible,
   });
 
-  const isLoading = enseignantsLoading || banquesLoading || promotionsLoading || cyclesLoading;
-
-  // Mutations
+  // Mutation pour générer l'ordre
   const generateMutation = useMutation({
-    mutationFn: (filtres: OrdreFiltres) =>
-      invoke<OrdreVirementOutput>('generer_ordre_virement_simulation', { filtres }),
+    mutationFn: async () => {
+      if (!mois || !annee) {
+        throw new Error("Veuillez sélectionner un mois et une année");
+      }
+      const result = await invoke<OrdreVirementResponse[]>('generer_ordre_virement', { 
+        mois: parseInt(mois), 
+        annee: parseInt(annee) 
+      });
+      return result;
+    },
+    onSuccess: (data) => {
+      if (data && data.length > 0) {
+        setSelectedOrdre(data[0]);
+      }
+    },
     onError: (err: any) => {
       console.error('Erreur génération:', err);
+      alert(`Erreur: ${err}`);
     },
   });
 
-  const saveMutation = useMutation({
-    mutationFn: (data: { filtres: OrdreFiltres; objet: string; motif?: string }) =>
-      invoke<OrdreVirementOutput>('sauvegarder_ordre_virement', {
-        filtres: data.filtres,
-        objet: data.objet,
-        motif: data.motif,
-        created_by: 'Utilisateur'
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ordres_virement'] });
-    },
-    onError: (err: any) => {
-      console.error('Erreur sauvegarde:', err);
-    },
-  });
+  const handleLoadOrdre = (ordre: OrdreVirementResponse) => {
+    setSelectedOrdre(ordre);
+    setSavedOrdresVisible(false);
+  };
 
-  const loadOrdreMutation = useMutation({
-    mutationFn: (id: number) => invoke<OrdreVirementOutput>('get_ordre_virement_by_id', { id }),
-    onSuccess: (data) => {
-      generateMutation.data = data;
-      setSelectedOrdreId(null);
-      setSavedOrdresVisible(false);
-    },
-    onError: (err: any) => {
-      console.error('Erreur chargement:', err);
-    },
-  });
+  const handleRefreshOrdres = () => {
+    refetchOrdres();
+  };
 
-  const ordre = generateMutation.data;
-
-  // Générer l'ordre
   const handleGenerer = () => {
-    const filtres: OrdreFiltres = {
-      filtre_banque: filters.filtre_banque || null,
-      filtre_enseignant_id: filters.filtre_enseignant_id || null,
-      filtre_mois: filters.filtre_mois || null,
-      filtre_annee: filters.filtre_annee || null,
-      filtre_annee_scolaire: filters.filtre_annee_scolaire || null,
-      filtre_promotion_id: filters.filtre_promotion_id || null,
-      filtre_cycle_id: filters.filtre_cycle_id || null,
-      filtre_module_id: filters.filtre_module_id || null,
-      filtre_matiere_id: filters.filtre_matiere_id || null,
-      filtre_date_debut: filters.filtre_date_debut
-        ? filters.filtre_date_debut.toISOString().split('T')[0]
-        : null,
-      filtre_date_fin: filters.filtre_date_fin
-        ? filters.filtre_date_fin.toISOString().split('T')[0]
-        : null,
-    };
-    generateMutation.mutate(filtres);
+    if (!mois || !annee) {
+      alert("Veuillez sélectionner un mois et une année");
+      return;
+    }
+    generateMutation.mutate();
   };
 
-  // Sauvegarder l'ordre
-  const handleSauvegarder = () => {
-    if (!ordre) return;
-
-    const filtres: OrdreFiltres = {
-      filtre_banque: filters.filtre_banque || null,
-      filtre_enseignant_id: filters.filtre_enseignant_id || null,
-      filtre_mois: filters.filtre_mois || null,
-      filtre_annee: filters.filtre_annee || null,
-      filtre_annee_scolaire: filters.filtre_annee_scolaire || null,
-      filtre_promotion_id: filters.filtre_promotion_id || null,
-      filtre_cycle_id: filters.filtre_cycle_id || null,
-      filtre_module_id: filters.filtre_module_id || null,
-      filtre_matiere_id: filters.filtre_matiere_id || null,
-      filtre_date_debut: filters.filtre_date_debut
-        ? filters.filtre_date_debut.toISOString().split('T')[0]
-        : null,
-      filtre_date_fin: filters.filtre_date_fin
-        ? filters.filtre_date_fin.toISOString().split('T')[0]
-        : null,
-    };
-
-    saveMutation.mutate({
-      filtres,
-      objet: `Ordre de virement - ${new Date().toLocaleDateString()}`,
-      motif: 'Paiement des vacations'
-    });
-  };
-
-  // Charger un ordre sauvegardé
-  const handleLoadOrdre = (id: number) => {
-    loadOrdreMutation.mutate(id);
-  };
-
-  // Impression
   const handlePrint = useReactToPrint({
     contentRef: printRef,
   });
 
-  // Auto refresh
   useEffect(() => {
     if (!autoRefresh) return;
     const interval = setInterval(() => {
@@ -327,16 +156,55 @@ export default function OrdreVirement() {
   }, [autoRefresh, queryClient]);
 
   const formatMoney = (value?: number | null) => (value ?? 0).toLocaleString('fr-FR');
-  const total = ordre?.total_net ?? 0;
+  const total = selectedOrdre?.total_net ?? 0;
 
-  if (isLoading) {
-    return (
-      <Card withBorder radius="md" p="lg" pos="relative">
-        <LoadingOverlay visible={true} />
-        <Text>Chargement des données...</Text>
-      </Card>
-    );
-  }
+  const formatMontantLettre = (montant: number): string => {
+    const nombre = Math.floor(montant);
+    if (nombre === 0) return 'zéro francs CFA';
+
+    const unite = (n: number): string => {
+      const units = ['', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf'];
+      const teens = ['dix', 'onze', 'douze', 'treize', 'quatorze', 'quinze', 'seize', 'dix-sept', 'dix-huit', 'dix-neuf'];
+      const tens = ['', 'dix', 'vingt', 'trente', 'quarante', 'cinquante', 'soixante', 'soixante-dix', 'quatre-vingt', 'quatre-vingt-dix'];
+
+      if (n < 10) return units[n];
+      if (n < 20) return teens[n - 10];
+      if (n < 100) {
+        const t = Math.floor(n / 10);
+        const u = n % 10;
+        if (u === 0) return tens[t] + (t === 8 ? 's' : '');
+        if (t === 7 || t === 9) return tens[t] + '-' + teens[u];
+        return tens[t] + '-' + units[u];
+      }
+      return n.toString();
+    };
+
+    const convert = (n: number): string => {
+      if (n === 0) return '';
+      if (n < 100) return unite(n);
+      if (n < 1000) {
+        const c = Math.floor(n / 100);
+        const r = n % 100;
+        const cent = c === 1 ? 'cent' : unite(c) + ' cents';
+        return r === 0 ? cent : cent + ' ' + convert(r);
+      }
+      if (n < 1000000) {
+        const m = Math.floor(n / 1000);
+        const r = n % 1000;
+        const mille = m === 1 ? 'mille' : convert(m) + ' mille';
+        return r === 0 ? mille : mille + ' ' + convert(r);
+      }
+      return convert(Math.floor(n / 1000000)) + ' million' + (Math.floor(n / 1000000) > 1 ? 's' : '') + ' ' + convert(n % 1000000);
+    };
+
+    return convert(nombre) + ' francs CFA';
+  };
+
+  const date = new Date();
+  const jour = date.getDate();
+  const moisActuel = date.getMonth() + 1;
+  const anneeActuelle = date.getFullYear();
+  const moisLabel = MOIS_OPTIONS.find(m => m.value === String(moisActuel))?.label || '';
 
   return (
     <Stack p="md" gap="lg">
@@ -369,7 +237,10 @@ export default function OrdreVirement() {
               </Button>
               <Button
                 variant="light"
-                onClick={() => setSavedOrdresVisible(!savedOrdresVisible)}
+                onClick={() => {
+                  setSavedOrdresVisible(!savedOrdresVisible);
+                  if (!savedOrdresVisible) handleRefreshOrdres();
+                }}
                 leftSection={<IconEye size={16} />}
               >
                 Ordres sauvegardés
@@ -381,27 +252,15 @@ export default function OrdreVirement() {
               />
             </Group>
 
-            <Group>
-              <Button
-                onClick={handleGenerer}
-                loading={generateMutation.isPending}
-                leftSection={<IconRefresh size={16} />}
-                variant="gradient"
-                gradient={{ from: 'blue', to: 'cyan' }}
-              >
-                Générer
-              </Button>
-              {ordre && (
-                <Button
-                  onClick={handleSauvegarder}
-                  loading={saveMutation.isPending}
-                  leftSection={<IconDeviceFloppy size={16} />}
-                  color="green"
-                >
-                  Sauvegarder
-                </Button>
-              )}
-            </Group>
+            <Button
+              onClick={handleGenerer}
+              loading={generateMutation.isPending}
+              leftSection={<IconRefresh size={16} />}
+              variant="gradient"
+              gradient={{ from: 'blue', to: 'cyan' }}
+            >
+              Générer
+            </Button>
           </Group>
 
           <Collapse in={filtersVisible}>
@@ -411,84 +270,15 @@ export default function OrdreVirement() {
                 label="Mois"
                 placeholder="Sélectionner un mois"
                 data={MOIS_OPTIONS}
-                value={filters.filtre_mois}
-                onChange={(val) => setFilters({ ...filters, filtre_mois: val })}
-                clearable
+                value={mois}
+                onChange={setMois}
               />
               <Select
                 label="Année"
                 placeholder="Sélectionner une année"
                 data={ANNEES_OPTIONS}
-                value={filters.filtre_annee?.toString()}
-                onChange={(val) => setFilters({ ...filters, filtre_annee: val ? parseInt(val) : null })}
-                clearable
-              />
-              <Select
-                label="Année scolaire"
-                placeholder="Sélectionner une année scolaire"
-                data={ANNEES_SCOLAIRES_OPTIONS}
-                value={filters.filtre_annee_scolaire}
-                onChange={(val) => setFilters({ ...filters, filtre_annee_scolaire: val })}
-                clearable
-              />
-              <Select
-                label="Enseignant"
-                placeholder="Tous"
-                data={enseignants.map((e) => ({
-                  value: e.id.toString(),
-                  label: `${e.nom} ${e.prenom}`,
-                }))}
-                value={filters.filtre_enseignant_id}
-                onChange={(val) => setFilters({ ...filters, filtre_enseignant_id: val })}
-                clearable
-                searchable
-              />
-              <Select
-                label="Banque"
-                placeholder="Toutes"
-                data={banques.map((b) => ({
-                  value: b.designation,
-                  label: b.designation,
-                }))}
-                value={filters.filtre_banque}
-                onChange={(val) => setFilters({ ...filters, filtre_banque: val })}
-                clearable
-              />
-              <Select
-                label="Promotion"
-                placeholder="Toutes"
-                data={promotions.map((p) => ({
-                  value: p.id.toString(),
-                  label: p.libelle,
-                }))}
-                value={filters.filtre_promotion_id?.toString()}
-                onChange={(val) => setFilters({ ...filters, filtre_promotion_id: val ? parseInt(val) : null })}
-                clearable
-              />
-              <Select
-                label="Cycle"
-                placeholder="Tous"
-                data={cycles.map((c) => ({
-                  value: c.id.toString(),
-                  label: c.designation,
-                }))}
-                value={filters.filtre_cycle_id?.toString()}
-                onChange={(val) => setFilters({ ...filters, filtre_cycle_id: val ? parseInt(val) : null })}
-                clearable
-              />
-              <DateInput
-                label="Date début"
-                placeholder="JJ/MM/AAAA"
-                value={filters.filtre_date_debut}
-                onChange={(val) => setFilters({ ...filters, filtre_date_debut: val })}
-                clearable
-              />
-              <DateInput
-                label="Date fin"
-                placeholder="JJ/MM/AAAA"
-                value={filters.filtre_date_fin}
-                onChange={(val) => setFilters({ ...filters, filtre_date_fin: val })}
-                clearable
+                value={annee}
+                onChange={setAnnee}
               />
             </SimpleGrid>
           </Collapse>
@@ -498,7 +288,12 @@ export default function OrdreVirement() {
       {/* LISTE DES ORDRES SAUVEGARDÉS */}
       <Collapse in={savedOrdresVisible}>
         <Card withBorder radius="md" p="lg">
-          <Title order={4} mb="md">Ordres de virement sauvegardés</Title>
+          <Group justify="space-between" mb="md">
+            <Title order={4}>Ordres de virement sauvegardés</Title>
+            <Button size="xs" variant="light" onClick={handleRefreshOrdres}>
+              Rafraîchir
+            </Button>
+          </Group>
           {ordresLoading ? (
             <LoadingOverlay visible={true} />
           ) : ordresSaved.length === 0 ? (
@@ -512,20 +307,22 @@ export default function OrdreVirement() {
                   <Table.Tr>
                     <Table.Th>N° Ordre</Table.Th>
                     <Table.Th>Date</Table.Th>
-                    <Table.Th>Objet</Table.Th>
+                    <Table.Th>Banque</Table.Th>
+                    <Table.Th>Total</Table.Th>
                     <Table.Th style={{ width: 100 }}>Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {ordresSaved.map((o) => (
-                    <Table.Tr key={o.id}>
+                  {ordresSaved.map((ordre) => (
+                    <Table.Tr key={ordre.id}>
                       <Table.Td>
-                        <Badge color="blue" variant="light">{o.numero_ordre}</Badge>
+                        <Badge color="blue" variant="light">{ordre.numero_ordre}</Badge>
                       </Table.Td>
-                      <Table.Td>{o.date_edition}</Table.Td>
-                      <Table.Td>{o.objet}</Table.Td>
+                      <Table.Td>{ordre.date_edition}</Table.Td>
+                      <Table.Td>{ordre.banque_designation}</Table.Td>
+                      <Table.Td>{formatMoney(ordre.total_net)} FCFA</Table.Td>
                       <Table.Td>
-                        <Button size="xs" variant="light" onClick={() => handleLoadOrdre(o.id)}>
+                        <Button size="xs" variant="light" onClick={() => handleLoadOrdre(ordre)}>
                           Charger
                         </Button>
                       </Table.Td>
@@ -545,80 +342,67 @@ export default function OrdreVirement() {
         </Alert>
       )}
 
-      {/* MESSAGE DE SUCCÈS */}
-      {saveMutation.isSuccess && (
-        <Alert icon={<IconCheck size={16} />} color="green" variant="light">
-          Ordre de virement sauvegardé avec succès
-        </Alert>
-      )}
-
       {/* RÉSULTAT - ORDRE DE VIREMENT */}
-      {ordre && ordre.lignes && ordre.lignes.length > 0 && (
+      {selectedOrdre && selectedOrdre.lignes && selectedOrdre.lignes.length > 0 && (
         <>
           <Card withBorder radius="md" p="lg" ref={printRef}>
-            {/* En-tête */}
-            <Stack gap="md" style={{ textAlign: 'center' }}>
-              <Text fw={700} size="lg">{ordre.entete.ministere}</Text>
-              <Text>{ordre.entete.ecole}</Text>
-              <Divider />
-              <Title order={3}>ORDRE DE VIREMENT</Title>
-              <Text>N° {ordre.numero_ordre}</Text>
-              <Text>Date: {ordre.date_edition}</Text>
-              <Text>Objet: {ordre.objet}</Text>
-              {ordre.motif && <Text>Motif: {ordre.motif}</Text>}
-            </Stack>
+            {/* EN-TÊTE */}
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <Text fw={700} size="lg" tt="uppercase">MINISTÈRE DE LA SÉCURITÉ</Text>
+              <Text fw={500}>SECRÉTARIAT GÉNÉRAL</Text>
+              <Text fw={500} tt="uppercase">ECOLE NATIONALE DE POLICE</Text>
+              <Text fw={500}>DIRECTION GÉNÉRALE</Text>
+              <Text fw={500}>DIRECTION DE L'ADMINISTRATION DES FINANCES</Text>
+            </div>
 
-            {/* Filtres appliqués */}
-            {(ordre.filtre_mois || ordre.filtre_annee || ordre.filtre_promotion_libelle) && (
-              <Stack gap="xs" mt="md" p="sm" bg="gray.0" style={{ borderRadius: 8 }}>
-                <Text size="sm" fw={500}>Filtres appliqués:</Text>
-                <Group gap="xs">
-                  {ordre.filtre_mois && (
-                    <Badge variant="light">
-                      Mois: {MOIS_OPTIONS.find(m => m.value === ordre.filtre_mois)?.label}
-                    </Badge>
-                  )}
-                  {ordre.filtre_annee && (
-                    <Badge variant="light">Année: {ordre.filtre_annee}</Badge>
-                  )}
-                  {ordre.filtre_annee_scolaire && (
-                    <Badge variant="light">Année scolaire: {ordre.filtre_annee_scolaire}</Badge>
-                  )}
-                  {ordre.filtre_promotion_libelle && (
-                    <Badge variant="light">Promotion: {ordre.filtre_promotion_libelle}</Badge>
-                  )}
-                </Group>
-              </Stack>
-            )}
+            <div style={{ textAlign: 'right', marginBottom: 20 }}>
+              <Text>N°2026-_____/MSEU/SG/ENP/DG/DAF</Text>
+            </div>
 
-            {/* Tableau des bénéficiaires */}
-            <ScrollArea style={{ maxHeight: 500 }} mt="md">
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <Text fw={700} size="lg">BURKINA FASO</Text>
+              <Text>La Patrie ou la Mort, nous vaincrons</Text>
+            </div>
+
+            <div style={{ textAlign: 'right', marginBottom: 20 }}>
+              <Text>Ouagadougou, le {jour} {moisLabel} {anneeActuelle}</Text>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <Text>Le Directeur Général</Text>
+              <Text>À</Text>
+              <Text fw={500}>Monsieur le Directeur Général de {selectedOrdre.banque_designation}</Text>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <Text fw={700}>Objet: Ordre de virement de fond</Text>
+            </div>
+
+            <Text mb={20}>
+              J'ai l'honneur de solliciter le virement de la somme de <strong>{formatMontantLettre(total)}</strong> représenté par ce chèque au profit de:
+            </Text>
+
+            {/* TABLEAU DES BÉNÉFICIAIRES */}
+            <ScrollArea style={{ maxHeight: 400 }} mb={20}>
               <Table striped highlightOnHover>
                 <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th style={{ width: 50 }}>N°</Table.Th>
-                    <Table.Th>Enseignant</Table.Th>
-                    <Table.Th>Statut</Table.Th>
-                    <Table.Th>Banque</Table.Th>
-                    <Table.Th>Compte</Table.Th>
-                    <Table.Th style={{ textAlign: 'right' }}>Montant Net (FCFA)</Table.Th>
+                  <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+                    <Table.Th style={{ color: 'white', width: 50, textAlign: 'center' }}>N°</Table.Th>
+                    <Table.Th style={{ color: 'white' }}>Nom Prénom</Table.Th>
+                    <Table.Th style={{ color: 'white' }}>Numéro de compte</Table.Th>
+                    <Table.Th style={{ color: 'white', width: 70, textAlign: 'center' }}>Clé</Table.Th>
+                    <Table.Th style={{ color: 'white' }}>Banque</Table.Th>
+                    <Table.Th style={{ color: 'white', textAlign: 'right' }}>Montant</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {ordre.lignes.map((ligne, idx) => (
-                    <Table.Tr key={idx}>
-                      <Table.Td>{idx + 1}</Table.Td>
-                      <Table.Td>
-                        <Text fw={500}>{ligne.nom} {ligne.prenom}</Text>
-                        <Text size="xs" c="dimmed">{ligne.titre}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge size="xs" color={ligne.statut_enseignant === 'interne' ? 'green' : 'orange'}>
-                          {ligne.statut_enseignant === 'interne' ? 'Interne' : 'Externe'}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>{ligne.banque_designation || '—'}</Table.Td>
+                  {selectedOrdre.lignes.map((ligne, idx) => (
+                    <Table.Tr key={ligne.id}>
+                      <Table.Td style={{ textAlign: 'center' }}>{idx + 1}</Table.Td>
+                      <Table.Td>{ligne.nom} {ligne.prenom}</Table.Td>
                       <Table.Td>{ligne.numero_compte || '—'}</Table.Td>
+                      <Table.Td style={{ textAlign: 'center' }}>{ligne.cle_rib || '—'}</Table.Td>
+                      <Table.Td>{selectedOrdre.banque_designation}</Table.Td>
                       <Table.Td style={{ textAlign: 'right', fontWeight: 'bold' }}>
                         {formatMoney(ligne.montant_net)}
                       </Table.Td>
@@ -628,33 +412,47 @@ export default function OrdreVirement() {
                 <Table.Tfoot>
                   <Table.Tr style={{ backgroundColor: '#f5f5f5' }}>
                     <Table.Td colSpan={5} style={{ textAlign: 'right', fontWeight: 'bold' }}>
-                      TOTAL GÉNÉRAL
+                      Montant total à virer
                     </Table.Td>
                     <Table.Td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1.1em' }}>
-                      {formatMoney(total)} FCFA
+                      {formatMoney(total)}
                     </Table.Td>
                   </Table.Tr>
                 </Table.Tfoot>
               </Table>
             </ScrollArea>
 
-            {/* Arrêté */}
-            <Text mt="xl" fw={500}>
-              Arrêté le présent ordre à la somme de : <strong>{formatMoney(total)} FCFA</strong>
+            <div style={{ marginTop: 20 }}>
+              <Text>
+                Arrêté le présent état à la somme de : <strong>{formatMontantLettre(total)}</strong>
+              </Text>
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <Text>
+                Ce virement représente le paiement des frais de vacation des cours dispensés aux élèves de la 55ème promotion de l'Ecole Nationale de Police au titre des années scolaires 2024-2025 et 2025-2026.
+              </Text>
+            </div>
+
+            <Text mt={20}>
+              Je vous saurai gré des dispositions que vous ferez prendre pour la satisfaction dudit virement.
             </Text>
 
-            {/* Signatures */}
-            <SimpleGrid cols={2} mt={60}>
-              <Stack align="center" gap="xl">
-                <Text>Le Chef du Service Financier</Text>
-                <Text fw={700}>{ordre.entete.chef_service_nom || '_________________'}</Text>
-                <Text size="sm">{ordre.entete.chef_service_titre || ''}</Text>
-              </Stack>
-              <Stack align="center" gap="xl">
-                <Text>Le Directeur</Text>
-                <Text fw={700}>{ordre.entete.directeur_nom || '_________________'}</Text>
-                <Text size="sm">{ordre.entete.directeur_titre || ''}</Text>
-              </Stack>
+            {/* SIGNATURES */}
+            <SimpleGrid cols={2} mt={50}>
+              <div style={{ textAlign: 'center' }}>
+                <Text>Le Directeur de l'Administration des Finances</Text>
+                <div style={{ height: 40 }}></div>
+                <Text fw={700}>Salif SINDE</Text>
+                <Text size="sm">Commissaire Divisionnaire de Police</Text>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <Text>Le Directeur Général</Text>
+                <div style={{ height: 40 }}></div>
+                <Text fw={700}>Abdoulaye BELEM</Text>
+                <Text size="sm">Commissaire Divisionnaire de Police</Text>
+                <Text size="sm">Chevalier de l'Ordre de l'Étalon</Text>
+              </div>
             </SimpleGrid>
           </Card>
 
@@ -667,7 +465,7 @@ export default function OrdreVirement() {
       )}
 
       {/* AUCUN RÉSULTAT */}
-      {ordre && (!ordre.lignes || ordre.lignes.length === 0) && (
+      {selectedOrdre && (!selectedOrdre.lignes || selectedOrdre.lignes.length === 0) && (
         <Alert icon={<IconAlertCircle size={16} />} color="yellow" title="Aucun résultat">
           Aucune vacation trouvée pour les filtres sélectionnés.
         </Alert>
@@ -677,11 +475,10 @@ export default function OrdreVirement() {
       <Card withBorder radius="md" p="lg">
         <Title order={5} mb="md">📋 Instructions</Title>
         <Stack gap="xs">
-          <Text size="sm">1. Sélectionnez les filtres souhaités (mois, année, enseignant, etc.)</Text>
+          <Text size="sm">1. Sélectionnez un mois et une année</Text>
           <Text size="sm">2. Cliquez sur "Générer" pour créer l'ordre de virement</Text>
-          <Text size="sm">2. L'ordre de virement est généré après validation de la vacation</Text>
-          <Text size="sm">3. Vérifiez le tableau des bénéficiaires et les montants</Text>
-          <Text size="sm">4. Sauvegardez l'ordre pour une utilisation ultérieure</Text>
+          <Text size="sm">3. L'ordre est généré automatiquement par banque</Text>
+          <Text size="sm">4. Consultez les ordres sauvegardés dans l'onglet correspondant</Text>
           <Text size="sm">5. Imprimez l'ordre pour signature et transmission à la banque</Text>
         </Stack>
       </Card>

@@ -17,6 +17,7 @@ pub struct Enseignant {
     pub telephone: Option<String>,
     pub titre: String,
     pub statut: String,
+    pub vh_max: f64,  // ← AJOUTÉ
 }
 
 // =========================
@@ -66,40 +67,11 @@ pub async fn get_enseignants(
     state: State<'_, DbState>,
 ) -> Result<Vec<Enseignant>, String> {
     sqlx::query_as::<_, Enseignant>(
-        "SELECT * FROM enseignants ORDER BY nom, prenom"
+        "SELECT id, nom, prenom, telephone, titre, statut, vh_max FROM enseignants ORDER BY nom, prenom"
     )
     .fetch_all(&state.pool)
     .await
     .map_err(|e| e.to_string())
-}
-
-// =========================
-// CREATE
-// =========================
-
-#[tauri::command]
-pub async fn create_enseignant(
-    state: State<'_, DbState>,
-    input: CreateEnseignantInput,
-) -> Result<Enseignant, String> {
-
-    let id: i32 = sqlx::query_scalar(
-        r#"
-        INSERT INTO enseignants (nom, prenom, telephone, titre, statut)
-        VALUES (?, ?, ?, ?, ?)
-        RETURNING id
-        "#
-    )
-    .bind(&input.nom)
-    .bind(&input.prenom)
-    .bind(&input.telephone)
-    .bind(&input.titre)
-    .bind(&input.statut)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    get_enseignant_by_id(state, id).await
 }
 
 // =========================
@@ -112,7 +84,7 @@ pub async fn get_enseignant_by_id(
     id: i32,
 ) -> Result<Enseignant, String> {
     sqlx::query_as::<_, Enseignant>(
-        "SELECT * FROM enseignants WHERE id = ?"
+        "SELECT id, nom, prenom, telephone, titre, statut, vh_max FROM enseignants WHERE id = ?"
     )
     .bind(id)
     .fetch_one(&state.pool)
@@ -121,7 +93,47 @@ pub async fn get_enseignant_by_id(
 }
 
 // =========================
-// UPDATE
+// CREATE - Avec auto-remplissage de vh_max
+// =========================
+
+#[tauri::command]
+pub async fn create_enseignant(
+    state: State<'_, DbState>,
+    input: CreateEnseignantInput,
+) -> Result<Enseignant, String> {
+
+    // Vérifier que le plafond existe pour ce couple (titre, statut)
+    let vh_max: i32 = sqlx::query_scalar(
+        "SELECT volume_horaire_max FROM plafonds WHERE titre = ? AND statut = ?"
+    )
+    .bind(&input.titre)
+    .bind(&input.statut)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|_| format!("Plafond non trouvé pour titre='{}' et statut='{}'", input.titre, input.statut))?;
+
+    let id: i32 = sqlx::query_scalar(
+        r#"
+        INSERT INTO enseignants (nom, prenom, telephone, titre, statut, vh_max)
+        VALUES (?, ?, ?, ?, ?, ?)
+        RETURNING id
+        "#
+    )
+    .bind(&input.nom)
+    .bind(&input.prenom)
+    .bind(&input.telephone)
+    .bind(&input.titre)
+    .bind(&input.statut)
+    .bind(vh_max as f64)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    get_enseignant_by_id(state, id).await
+}
+
+// =========================
+// UPDATE - Avec recalcul de vh_max si titre/statut changent
 // =========================
 
 #[tauri::command]
@@ -131,10 +143,30 @@ pub async fn update_enseignant(
     input: UpdateEnseignantInput,
 ) -> Result<Enseignant, String> {
 
+    // Récupérer l'ancien enseignant
+    let old = get_enseignant_by_id(state.clone(), id).await?;
+    
+    // Déterminer la nouvelle valeur de vh_max
+    let vh_max = if old.titre != input.titre || old.statut != input.statut {
+        // Si titre ou statut a changé, aller chercher le nouveau plafond
+        let new_max: i32 = sqlx::query_scalar(
+            "SELECT volume_horaire_max FROM plafonds WHERE titre = ? AND statut = ?"
+        )
+        .bind(&input.titre)
+        .bind(&input.statut)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|_| format!("Plafond non trouvé pour titre='{}' et statut='{}'", input.titre, input.statut))?;
+        new_max as f64
+    } else {
+        // Sinon, garder l'ancienne valeur
+        old.vh_max
+    };
+
     sqlx::query(
         r#"
         UPDATE enseignants
-        SET nom = ?, prenom = ?, telephone = ?, titre = ?, statut = ?
+        SET nom = ?, prenom = ?, telephone = ?, titre = ?, statut = ?, vh_max = ?
         WHERE id = ?
         "#
     )
@@ -143,6 +175,7 @@ pub async fn update_enseignant(
     .bind(&input.telephone)
     .bind(&input.titre)
     .bind(&input.statut)
+    .bind(vh_max)
     .bind(id)
     .execute(&state.pool)
     .await
@@ -201,17 +234,14 @@ pub async fn get_enseignants_with_cumul(
             e.titre,
             e.statut,
 
-            p.volume_horaire_max AS volume_max,
+            e.vh_max AS volume_max,
 
             COALESCE(SUM(v.nb_classe * v.vhoraire), 0) AS heures_consommees,
 
-            (p.volume_horaire_max - COALESCE(SUM(v.nb_classe * v.vhoraire), 0)) 
+            (e.vh_max - COALESCE(SUM(v.nb_classe * v.vhoraire), 0)) 
             AS heures_restantes
 
         FROM enseignants e
-
-        JOIN plafonds p 
-            ON p.titre = e.titre AND p.statut = e.statut
 
         LEFT JOIN vacations v 
             ON v.enseignant_id = e.id
